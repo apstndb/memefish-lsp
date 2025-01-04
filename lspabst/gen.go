@@ -9,6 +9,9 @@ import (
 	"go.lsp.dev/protocol"
 )
 
+var _ context.Context
+
+// Check Can* interfaces are exhaustive
 var _ protocol.Server = interface {
 	CanCodeAction
 	CanCodeLens
@@ -72,7 +75,7 @@ var _ protocol.Server = interface {
 	CanWorkDoneProgressCancel
 }(nil)
 
-var _ protocol.Server = (*Wrapper)(nil)
+// Generate Can* interfaces
 
 type CanCodeAction interface {
 	CodeAction(ctx context.Context, params *protocol.CodeActionParams) (result []protocol.CodeAction, err error)
@@ -313,6 +316,8 @@ type CanWillSaveWaitUntil interface {
 type CanWorkDoneProgressCancel interface {
 	WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) (err error)
 }
+
+// Generate wrapper methods for *Wrapper
 
 func (s *Wrapper) CodeAction(ctx context.Context, params *protocol.CodeActionParams) (result []protocol.CodeAction, err error) {
 	s.logger.Info("CodeAction", slog.Any("ctx", ctx), slog.Any("params", params))

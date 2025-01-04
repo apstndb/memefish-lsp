@@ -1,6 +1,10 @@
 package lspabst
 
-import "log/slog"
+import (
+	"log/slog"
+
+	"go.lsp.dev/protocol"
+)
 
 func New(handler any, logger *slog.Logger) *Wrapper {
 	return &Wrapper{
@@ -8,6 +12,8 @@ func New(handler any, logger *slog.Logger) *Wrapper {
 		logger:  logger,
 	}
 }
+
+var _ protocol.Server = (*Wrapper)(nil)
 
 type Wrapper struct {
 	handler any

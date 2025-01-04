@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
 	"log/slog"
@@ -48,13 +49,14 @@ func (r *readWriteCloser) Close() error {
 }
 
 type Server struct {
-	conn            jsonrpc2.Conn
-	logFile         *os.File
-	paths           []string
-	handler         protocol.Server
-	logger          *slog.Logger
-	afterInitialize bool
-	afterShutdown   bool
+	conn             jsonrpc2.Conn
+	logFile          *os.File
+	paths            []string
+	handler          protocol.Server
+	logger           *slog.Logger
+	afterInitialize  bool
+	afterShutdown    bool
+	initializeParams *protocol.InitializeParams
 }
 
 func New() *Server {
@@ -115,6 +117,12 @@ func (s *Server) customServerHandler() jsonrpc2.Handler {
 			switch {
 			case r.Method() == protocol.MethodInitialize:
 				s.afterInitialize = true
+				params := &protocol.InitializeParams{}
+				if err := json.Unmarshal(req.Params(), params); err != nil {
+					s.logger.Warn("InitializeParams can't be decoded", slog.Any("err", err))
+				} else {
+					s.initializeParams = params
+				}
 			case s.afterShutdown:
 				return jsonrpc2.ErrInvalidRequest
 			case !s.afterInitialize:
