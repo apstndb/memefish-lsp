@@ -58,42 +58,25 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 
 	stmts := h.parsedMap[filename]
 
-	var deepestPath []string
-	var deepestPosition *token.Position
-	var nodes []ast.Node
+	path := findNodesByPos(h.logger, lex, stmts, pos)
 
-	memewalk.WalkSlice(stmts, func(path []string, node ast.Node) error {
-		if node == nil {
-			return nil
-		}
-
-		nodePos := lex.Position(node.Pos(), node.End())
-
-		switch {
-		case pos.Line == uint32(nodePos.Line) && pos.Line == uint32(nodePos.EndLine) && uint32(nodePos.Column) <= pos.Character && pos.Character <= uint32(nodePos.EndColumn),
-			nodePos.Line < nodePos.EndLine && uint32(nodePos.Line) <= pos.Line && pos.Line <= uint32(nodePos.EndLine):
-			if len(deepestPath) < len(path) {
-				deepestPath = path
-				deepestPosition = nodePos
-				nodes = append(nodes, node)
-			}
-		default:
-			return nil
-		}
-		return nil
-	})
-
-	if len(deepestPath) == 0 {
+	if len(path) == 0 {
 		return &protocol.Hover{}, nil
 	}
 
-	h.logger.Info("Hover: length", slog.Any("len(deepestPath)", len(deepestPath)), slog.Any("len(nodes)", len(nodes)))
-
 	var buf strings.Builder
-	for i := range deepestPath {
-		fmt.Fprintf(&buf, "- `%v`: `%T`\n", strings.Join(deepestPath[:i+1], ""), nodes[i])
+	for i := range path {
+		fmt.Fprintf(&buf, "- `%v`: `%T`\n", strings.Join(lo.Map(path[:i+1], func(item pathElem, _ int) string {
+			return item.Accessor
+		}), ""), path[i].Node)
 	}
 
+	deepestElem, ok := lo.Last(path)
+	if !ok {
+		return &protocol.Hover{}, nil
+	}
+
+	position := positionByNode(lex, deepestElem.Node)
 	return &protocol.Hover{
 		Contents: protocol.MarkupContent{
 			Kind:  protocol.Markdown,
@@ -101,15 +84,75 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 		},
 		Range: &protocol.Range{
 			Start: protocol.Position{
-				Line:      uint32(deepestPosition.Line),
-				Character: uint32(deepestPosition.Column),
+				Line:      uint32(position.Line),
+				Character: uint32(position.Column),
 			},
 			End: protocol.Position{
-				Line:      uint32(deepestPosition.EndLine),
-				Character: uint32(deepestPosition.EndColumn),
+				Line:      uint32(position.EndLine),
+				Character: uint32(position.EndColumn),
 			},
 		},
 	}, nil
+}
+
+type pathElem struct {
+	Accessor string
+	Node     ast.Node
+}
+
+func findNodesByPos(logger *slog.Logger, lex *memefish.Lexer, stmts []ast.Statement, lspPos protocol.Position) []pathElem {
+	var result []pathElem
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		if node == nil {
+			return false
+		}
+
+		nodePos := lex.Position(node.Pos(), node.End())
+
+		// logger.Info("findNodesByPos", slog.Any("path", path), slog.String("nodeType", fmt.Sprintf("%T", node)), slog.Any("nodePos", positionByNode(lex, node)))
+		if include(nodePos, lspPos) {
+			// logger.Info("findNodesByPos", slog.Any("path", path), slog.String("nodeType", fmt.Sprintf("%T", node)))
+			result = append(result, pathElem{
+				Accessor: lo.LastOrEmpty(path),
+				Node:     node,
+			})
+			return true
+		}
+		return false
+	})
+	return result
+}
+
+func include(nodePos *token.Position, lspPos protocol.Position) bool {
+	lspPosLine := int(lspPos.Line)
+	lspPosChar := int(lspPos.Character)
+
+	switch {
+	case lspPosLine < nodePos.Line, nodePos.EndLine < lspPosLine, // out of line range
+		lspPosLine == nodePos.Line && lspPosChar < nodePos.Column,       // before first char of node
+		lspPosLine == nodePos.EndLine && nodePos.EndColumn < lspPosChar: // after last char of node
+		return false
+	default:
+		return true
+	}
+}
+
+func toFoldingRange(position *token.Position, kind protocol.FoldingRangeKind) protocol.FoldingRange {
+	return protocol.FoldingRange{
+		StartLine:      uint32(position.Line),
+		StartCharacter: uint32(position.Column),
+		EndLine:        uint32(position.EndLine),
+		EndCharacter:   uint32(position.EndColumn),
+		Kind:           kind,
+	}
+}
+
+func toFoldingRangeByNode(lex *memefish.Lexer, node ast.Node, kind protocol.FoldingRangeKind) protocol.FoldingRange {
+	return toFoldingRange(positionByNode(lex, node), kind)
+}
+
+func positionByNode(lex *memefish.Lexer, node ast.Node) *token.Position {
+	return lex.Position(node.Pos(), node.End())
 }
 
 func (h *Handler) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error) {
@@ -122,19 +165,33 @@ func (h *Handler) FoldingRanges(ctx context.Context, params *protocol.FoldingRan
 	for tok, _ := range gsqlutils.LexerSeq(lex) {
 		for _, comment := range tok.Comments {
 			if strings.HasPrefix(comment.Raw, "/*") {
-				position := lex.Position(comment.Pos, comment.End)
-
-				result = append(result, protocol.FoldingRange{
-					StartLine:      uint32(position.Line),
-					StartCharacter: uint32(position.Column),
-					EndLine:        uint32(position.EndLine),
-					EndCharacter:   uint32(position.EndColumn),
-					Kind:           protocol.CommentFoldingRange,
-				})
+				result = append(result, toFoldingRange(lex.Position(comment.Pos, comment.End), protocol.CommentFoldingRange))
 			}
 		}
 	}
-	// stmts := h.parsedMap[filename]
+
+	var visitorFunc func(path []string, node ast.Node) memewalk.Visitor
+
+	visitorFunc = func(path []string, node ast.Node) memewalk.Visitor {
+		switch n := node.(type) {
+		case *ast.CTE:
+			result = append(result, toFoldingRangeByNode(lex, n.QueryExpr, protocol.RegionFoldingRange))
+		case *ast.ArraySubQuery:
+			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+		case *ast.SubQueryTableExpr:
+			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+		case *ast.ParenTableExpr:
+			result = append(result, toFoldingRangeByNode(lex, n.Source, protocol.RegionFoldingRange))
+		case *ast.ScalarSubQuery:
+			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+		case *ast.SubQuery:
+			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+		default:
+		}
+		return memewalk.VisitorFunc(visitorFunc)
+	}
+	stmts := h.parsedMap[filename]
+	memewalk.WalkSlice(stmts, memewalk.VisitorFunc(visitorFunc))
 
 	return result, nil
 }
@@ -367,20 +424,23 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.InitializePar
 	h.supportedDefinitionLinkClient = lo.FromPtr(textDocument.Definition).LinkSupport
 
 	h.logger.Info("Initialize", slog.Any("params", params), slog.Any("tokenTypeMap", h.tokenTypeMap))
-	return &protocol.InitializeResult{Capabilities: protocol.ServerCapabilities{
-		TextDocumentSync: protocol.TextDocumentSyncKindFull,
-		SemanticTokensProvider: map[string]any{
-			"legend": protocol.SemanticTokensLegend{
-				TokenTypes:     tokenTypes,
-				TokenModifiers: tokenModifiers,
+	return &protocol.InitializeResult{
+		ServerInfo: &protocol.ServerInfo{},
+		Capabilities: protocol.ServerCapabilities{
+
+			TextDocumentSync: protocol.TextDocumentSyncKindFull,
+			SemanticTokensProvider: map[string]any{
+				"legend": protocol.SemanticTokensLegend{
+					TokenTypes:     tokenTypes,
+					TokenModifiers: tokenModifiers,
+				},
+				"full": true,
 			},
-			"full": true,
-		},
-		FoldingRangeProvider: true,
-		HoverProvider:        true,
-		// DefinitionProvider: true,
-		// CompletionProvider: &protocol.CompletionOptions{},
-		// HoverProvider: true,
-	}}, nil
+			FoldingRangeProvider: true,
+			HoverProvider:        true,
+			// DefinitionProvider: true,
+			// CompletionProvider: &protocol.CompletionOptions{},
+			// HoverProvider: true,
+		}}, nil
 	// return h.initialize(params)
 }

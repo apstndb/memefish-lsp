@@ -1,7 +1,6 @@
 package memewalk
 
 import (
-	"errors"
 	"fmt"
 	"iter"
 	"reflect"
@@ -10,8 +9,30 @@ import (
 	"github.com/cloudspannerecosystem/memefish/ast"
 )
 
-func Walk(node ast.Node, f func(path []string, node ast.Node) error) error {
-	return walk(node, []string{"$"}, f)
+type Visitor interface {
+	Visit(path []string, node ast.Node) Visitor
+}
+
+func Walk(node ast.Node, v Visitor) {
+	walk(node, []string{"$"}, v)
+}
+
+type InspectFuncType = func(path []string, node ast.Node) bool
+type InspectFunc InspectFuncType
+
+func (i InspectFunc) Visit(path []string, node ast.Node) Visitor {
+	if !i(path, node) {
+		return nil
+	}
+	return i
+}
+
+func InspectSlice[T ast.Node](nodes []T, f InspectFuncType) {
+	WalkSlice(nodes, InspectFunc(f))
+}
+
+func Inspect(node ast.Node, f InspectFuncType) {
+	Walk(node, InspectFunc(f))
 }
 
 func fields(val reflect.Value) iter.Seq2[reflect.StructField, reflect.Value] {
@@ -24,20 +45,22 @@ func fields(val reflect.Value) iter.Seq2[reflect.StructField, reflect.Value] {
 	}
 }
 
-func WalkSlice[T ast.Node](nodes []T, f func(path []string, node ast.Node) error) error {
-	var errs []error
-	for i, node := range nodes {
-		err := walk(node, []string{fmt.Sprintf("$[%d]", i)}, f)
-		if err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+type VisitorFunc func(path []string, node ast.Node) Visitor
+
+func (f VisitorFunc) Visit(path []string, node ast.Node) Visitor {
+	return f(path, node)
 }
 
-func walk(node ast.Node, path []string, f func(path []string, node ast.Node) error) error {
-	if err := f(path, node); err != nil {
-		return err
+func WalkSlice[T ast.Node](nodes []T, v Visitor) {
+	for i, node := range nodes {
+		walk(node, []string{fmt.Sprintf("$[%d]", i)}, v)
+	}
+}
+
+func walk(node ast.Node, path []string, v Visitor) {
+	v = v.Visit(path, node)
+	if v == nil {
+		return
 	}
 
 	val := reflect.ValueOf(node)
@@ -46,30 +69,21 @@ func walk(node ast.Node, path []string, f func(path []string, node ast.Node) err
 		case reflect.Ptr, reflect.Interface:
 			val = val.Elem()
 		default:
-			return nil
+			return
 		}
 	}
 
 	for field, val := range fields(val) {
-
+		fieldPart := "." + field.Name
 		switch {
 		case val.Kind() == reflect.Slice && val.Type().Elem().Implements(reflect.TypeFor[ast.Node]()):
 			for i, val := range val.Seq2() {
-				path := slices.Concat(path, []string{"." + field.Name + "[" + fmt.Sprint(i) + "]"})
-
-				if err := walk(safeCast[ast.Node](val), path, f); err != nil {
-					return err
-				}
+				walk(safeCast[ast.Node](val), slices.Concat(path, []string{fieldPart + "[" + fmt.Sprint(i) + "]"}), v)
 			}
 		case val.Type().Implements(reflect.TypeFor[ast.Node]()):
-			path := slices.Concat(path, []string{"." + field.Name})
-			if err := walk(safeCast[ast.Node](val), path, f); err != nil {
-				return err
-			}
+			walk(safeCast[ast.Node](val), slices.Concat(path, []string{fieldPart}), v)
 		}
 	}
-
-	return nil
 }
 
 // safeCast returns argument value as parameter type.
