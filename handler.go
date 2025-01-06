@@ -170,9 +170,7 @@ func (h *Handler) FoldingRanges(ctx context.Context, params *protocol.FoldingRan
 		}
 	}
 
-	var visitorFunc func(path []string, node ast.Node) memewalk.Visitor
-
-	visitorFunc = func(path []string, node ast.Node) memewalk.Visitor {
+	visitorFunc := func(path []string, node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.CTE:
 			result = append(result, toFoldingRangeByNode(lex, n.QueryExpr, protocol.RegionFoldingRange))
@@ -183,15 +181,15 @@ func (h *Handler) FoldingRanges(ctx context.Context, params *protocol.FoldingRan
 		case *ast.ParenTableExpr:
 			result = append(result, toFoldingRangeByNode(lex, n.Source, protocol.RegionFoldingRange))
 		case *ast.ScalarSubQuery:
-			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+			result = append(result, toFoldingRange(lex.Position(n.Lparen+1, n.Rparen), protocol.RegionFoldingRange))
 		case *ast.SubQuery:
 			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
 		default:
 		}
-		return memewalk.VisitorFunc(visitorFunc)
+		return true
 	}
 	stmts := h.parsedMap[filename]
-	memewalk.WalkSlice(stmts, memewalk.VisitorFunc(visitorFunc))
+	memewalk.InspectSlice(stmts, visitorFunc)
 
 	return result, nil
 }

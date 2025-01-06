@@ -18,9 +18,9 @@ func Walk(node ast.Node, v Visitor) {
 }
 
 type InspectFuncType = func(path []string, node ast.Node) bool
-type InspectFunc InspectFuncType
+type inspectFuncVisitor InspectFuncType
 
-func (i InspectFunc) Visit(path []string, node ast.Node) Visitor {
+func (i inspectFuncVisitor) Visit(path []string, node ast.Node) Visitor {
 	if !i(path, node) {
 		return nil
 	}
@@ -28,11 +28,11 @@ func (i InspectFunc) Visit(path []string, node ast.Node) Visitor {
 }
 
 func InspectSlice[T ast.Node](nodes []T, f InspectFuncType) {
-	WalkSlice(nodes, InspectFunc(f))
+	WalkSlice(nodes, inspectFuncVisitor(f))
 }
 
 func Inspect(node ast.Node, f InspectFuncType) {
-	Walk(node, InspectFunc(f))
+	Walk(node, inspectFuncVisitor(f))
 }
 
 func fields(val reflect.Value) iter.Seq2[reflect.StructField, reflect.Value] {
