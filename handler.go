@@ -46,6 +46,36 @@ type Handler struct {
 	afterShutdown bool
 }
 
+func extractColumnName(query ast.QueryExpr) ([]string, bool) {
+	switch q := query.(type) {
+	case *ast.Select:
+		for _, r := range q.Results {
+			if AssertInterface[*ast.DotStar](r) || AssertInterface[*ast.Star](r) {
+				return nil, false
+			}
+		}
+
+		return lo.Map(q.Results, func(item ast.SelectItem, index int) string {
+			switch i := item.(type) {
+			case *ast.Alias:
+				return i.As.Alias.Name
+			case *ast.ExprSelectItem:
+				switch e := i.Expr.(type) {
+				case *ast.Ident:
+					return e.Name
+				case *ast.Path:
+					return lo.LastOrEmpty(e.Idents).Name
+				}
+			default:
+				return ""
+			}
+			return ""
+		}), true
+	default:
+		return nil, false
+	}
+}
+
 func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
 	var result []protocol.InlayHint
 	h.fileContentMu.Lock()
@@ -59,42 +89,83 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 			return false
 		}
 		switch n := node.(type) {
-		case *ast.Insert:
-			values, ok := n.Input.(*ast.ValuesInput)
+		case *ast.CompoundQuery:
+			names, ok := extractColumnName(n.Queries[0])
 			if !ok {
 				return true
 			}
-			for _, valuesRow := range values.Rows {
-				for i, expr := range valuesRow.Exprs {
-					if i > len(n.Columns) {
-						continue
+
+			for _, query := range n.Queries[1:] {
+				result = append(result, generateInlayHint(lex, query, names)...)
+			}
+		case *ast.Insert:
+			columns := lo.Map(n.Columns, func(item *ast.Ident, index int) string {
+				return item.Name
+			})
+
+			switch input := n.Input.(type) {
+			case *ast.SubQueryInput:
+				result = append(result, generateInlayHint(lex, input.Query, columns)...)
+			case *ast.ValuesInput:
+				for _, valuesRow := range input.Rows {
+					for i, expr := range valuesRow.Exprs {
+						// TODO: warn mismatch
+						if i > len(n.Columns) {
+							continue
+						}
+						result = append(result, newInlayHint(lex, protocol.Parameter, expr.Pos(), n.Columns[i].Name))
 					}
-					col := n.Columns[i]
-					line, char := lex.ResolvePos(expr.Pos())
-					result = append(result, protocol.InlayHint{
-						Position: protocol.Position{
-							Line:      uint32(line),
-							Character: uint32(char),
-						},
-						Label: []protocol.InlayHintLabelPart{{
-							Value:    col.Name,
-							Tooltip:  nil,
-							Location: nil,
-							Command:  nil,
-						}},
-						Kind:         protocol.Parameter,
-						TextEdits:    nil,
-						Tooltip:      nil,
-						PaddingLeft:  false,
-						PaddingRight: false,
-						Data:         nil,
-					})
 				}
 			}
 		}
 		return true
 	})
 	return result, nil
+}
+
+func generateInlayHint(lex *memefish.Lexer, query ast.QueryExpr, columnNames []string) []protocol.InlayHint {
+	var result []protocol.InlayHint
+	if sq, ok := query.(*ast.SubQuery); ok {
+		query = sq.Query
+	}
+	switch q := query.(type) {
+	case *ast.Select:
+		for _, r := range q.Results {
+			if AssertInterface[*ast.DotStar](r) || AssertInterface[*ast.Star](r) {
+				return nil
+			}
+		}
+
+		for i, item := range q.Results {
+			// TODO: warn mismatch
+			if i > len(columnNames) {
+				continue
+			}
+			result = append(result, newInlayHint(lex, protocol.Parameter, item.Pos(), columnNames[i]))
+		}
+	}
+	return result
+}
+
+func newInlayHint(lex *memefish.Lexer, parameter protocol.InlayHintKind, pos token.Pos, value string) protocol.InlayHint {
+	position := positionByPos(lex, pos)
+	hint := protocol.InlayHint{
+		Position: position,
+		Label: []protocol.InlayHintLabelPart{{
+			Value: value,
+		}},
+		Kind: parameter,
+	}
+	return hint
+}
+
+func positionByPos(lex *memefish.Lexer, pos token.Pos) protocol.Position {
+	line, char := lex.ResolvePos(pos)
+	position := protocol.Position{
+		Line:      uint32(line),
+		Character: uint32(char),
+	}
+	return position
 }
 
 func (h *Handler) SetClient(client protocol.Client) {
