@@ -119,14 +119,14 @@ func (s *Server) Preempt(ctx context.Context, req *jsonrpc2.Request) (any, error
 	switch {
 	case !req.IsCall(): // notification
 		switch {
-		case req.Method == "exit": // protocol.MethodExit:
+		case req.Method == protocol.RPCMethodExit:
 			os.Exit(lo.Ternary(s.afterShutdown, 0, 1))
 		case s.afterShutdown, !s.afterInitialize:
 			return nil, nil
 		}
 	case req.IsCall():
 		switch {
-		case req.Method == "initialize": // protocol.MethodInitialize:
+		case req.Method == protocol.RPCMethodInitialize:
 			s.afterInitialize = true
 			params := &protocol.InitializeParams{}
 			if err := json.Unmarshal(req.Params, params); err != nil {
