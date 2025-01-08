@@ -45,6 +45,23 @@ type Handler struct {
 	afterShutdown bool
 }
 
+func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
+	//TODO implement me
+	panic("implement me")
+	return &protocol.SignatureHelp{
+		Signatures: []protocol.SignatureInformation{
+			{
+				Label:           "",
+				Documentation:   nil,
+				Parameters:      nil,
+				ActiveParameter: 0,
+			},
+		},
+		ActiveParameter: 0,
+		ActiveSignature: 0,
+	}, nil
+}
+
 func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error) {
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
@@ -338,9 +355,9 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 
 	parsed, err := memefish.ParseStatements(uri.Filename(), text)
 	h.parsedMap[uri.Filename()] = parsed
+
 	if err != nil {
-		switch e := err.(type) {
-		case memefish.MultiError:
+		if e, ok := lo.ErrorsAs[memefish.MultiError](err); ok {
 			var diags []protocol.Diagnostic
 			for _, elem := range e {
 				diags = append(diags, protocol.Diagnostic{
@@ -355,7 +372,7 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 				return errors.Join(publishErr, err)
 			}
 			return err
-		default:
+		} else {
 			h.logger.Info("unknown error", slog.Any("err", err))
 		}
 	}
@@ -422,11 +439,11 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.InitializePar
 	h.supportedDefinitionLinkClient = lo.FromPtr(textDocument.Definition).LinkSupport
 
 	h.logger.Info("Initialize", slog.Any("params", params), slog.Any("tokenTypeMap", h.tokenTypeMap))
+
 	return &protocol.InitializeResult{
 		ServerInfo: &protocol.ServerInfo{},
 		Capabilities: protocol.ServerCapabilities{
-
-			TextDocumentSync: protocol.TextDocumentSyncKindFull,
+			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h), protocol.TextDocumentSyncKindFull, protocol.TextDocumentSyncKindNone),
 			SemanticTokensProvider: map[string]any{
 				"legend": protocol.SemanticTokensLegend{
 					TokenTypes:     tokenTypes,
@@ -434,11 +451,15 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.InitializePar
 				},
 				"full": true,
 			},
-			FoldingRangeProvider: true,
-			HoverProvider:        true,
+			FoldingRangeProvider: AssertInterface[lspabst.CanFoldingRanges](h),
+			HoverProvider:        AssertInterface[lspabst.CanHover](h),
 			// DefinitionProvider: true,
 			// CompletionProvider: &protocol.CompletionOptions{},
-			// HoverProvider: true,
 		}}, nil
 	// return h.initialize(params)
+}
+
+func AssertInterface[T any](v any) bool {
+	_, ok := v.(T)
+	return ok
 }

@@ -19,3 +19,9 @@ type Wrapper struct {
 	handler any
 	logger  *slog.Logger
 }
+
+type TextDocumentSyncCapability interface {
+	CanDidOpen
+	CanDidChange
+	CanDidClose
+}
