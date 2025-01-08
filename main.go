@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"log/slog"
@@ -11,8 +12,6 @@ import (
 
 	"github.com/apstndb/go-lsp-export/protocol"
 	"github.com/samber/lo"
-	"go.uber.org/multierr"
-	// "go.lsp.dev/jsonrpc2"
 	"golang.org/x/exp/jsonrpc2"
 
 	"github.com/apstndb/memefish-lsp/lspabst"
@@ -50,7 +49,7 @@ func (r *readWriteCloser) Write(b []byte) (int, error) {
 }
 
 func (r *readWriteCloser) Close() error {
-	return multierr.Append(r.readCloser.Close(), r.writeCloser.Close())
+	return errors.Join(r.readCloser.Close(), r.writeCloser.Close())
 }
 
 type Server struct {
