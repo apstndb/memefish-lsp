@@ -41,9 +41,9 @@ func (r *readWriteCloser) Dial(ctx context.Context) (io.ReadWriteCloser, error) 
 
 type Server struct {
 	// conn             *jsonrpc2.Connection
-	logFile          *os.File
-	paths            []string
-	handler          protocol.Server
+	logFile *os.File
+	paths   []string
+	// handler          protocol.Server
 	logger           *slog.Logger
 	afterInitialize  bool
 	afterShutdown    bool
@@ -51,16 +51,11 @@ type Server struct {
 }
 
 func New(ctx context.Context) (*Server, func() error) {
-	server := &Server{}
-	writer := os.Stderr
-	if server.logFile != nil {
-		writer = server.logFile
+	server := &Server{
+		logger: slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 	}
 
-	logger := slog.New(slog.NewJSONHandler(writer, nil))
-	server.logger = logger
-	rawHandler := NewHandler(logger, server.paths)
-	server.handler = lspabst.New(rawHandler, logger)
+	handler := NewHandler(server.logger, server.paths)
 
 	conn, err := jsonrpc2.Dial(ctx, &readWriteCloser{
 		readCloser:  os.Stdin,
@@ -68,14 +63,14 @@ func New(ctx context.Context) (*Server, func() error) {
 	}, &jsonrpc2.ConnectionOptions{
 		Framer:    nil,
 		Preempter: server,
-		Handler:   protocol.ServerHandler(server.handler, nil),
+		Handler:   protocol.ServerHandler(lspabst.New(handler, server.logger), nil),
 	})
 	if err != nil {
 		return nil, func() error { return err }
 	}
 
 	// workaround
-	rawHandler.SetClient(protocol.ClientDispatcher(conn))
+	handler.SetClient(protocol.ClientDispatcher(conn))
 
 	return server, func() error {
 		return conn.Wait()

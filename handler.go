@@ -29,7 +29,7 @@ var _ interface {
 	lspabst.CanDidClose
 	lspabst.CanSemanticTokensFull
 	lspabst.CanHover
-	// generated.CanDidChange
+	lspabst.TextDocumentSyncCapability
 } = (*Handler)(nil)
 
 type Handler struct {
@@ -46,9 +46,68 @@ type Handler struct {
 	afterShutdown bool
 }
 
+func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
+	var result []protocol.InlayHint
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	lex := newLexer(params.TextDocument.URI.Path(), string(h.fileToContentMap[params.TextDocument.URI.Path()]))
+	stmts := h.parsedMap[params.TextDocument.URI.Path()]
+
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		if node == nil {
+			return false
+		}
+		switch n := node.(type) {
+		case *ast.Insert:
+			values, ok := n.Input.(*ast.ValuesInput)
+			if !ok {
+				return true
+			}
+			for _, valuesRow := range values.Rows {
+				for i, expr := range valuesRow.Exprs {
+					if i > len(n.Columns) {
+						continue
+					}
+					col := n.Columns[i]
+					line, char := lex.ResolvePos(expr.Pos())
+					result = append(result, protocol.InlayHint{
+						Position: protocol.Position{
+							Line:      uint32(line),
+							Character: uint32(char),
+						},
+						Label: []protocol.InlayHintLabelPart{{
+							Value:    col.Name,
+							Tooltip:  nil,
+							Location: nil,
+							Command:  nil,
+						}},
+						Kind:         protocol.Parameter,
+						TextEdits:    nil,
+						Tooltip:      nil,
+						PaddingLeft:  false,
+						PaddingRight: false,
+						Data:         nil,
+					})
+				}
+			}
+		}
+		return true
+	})
+	return result, nil
+}
+
 func (h *Handler) SetClient(client protocol.Client) {
 	h.client = client
 }
+
+func (h *Handler) Client() (protocol.Client, error) {
+	if h.client != nil {
+		return h.client, nil
+	}
+	return nil, errors.New("client is not initialized")
+}
+
 func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
 	//TODO implement me
 	panic("implement me")
@@ -343,7 +402,11 @@ func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDoc
 }
 
 func (h *Handler) clearDiagnostics(ctx context.Context, uri protocol.DocumentURI) error {
-	return h.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{URI: uri, Diagnostics: []protocol.Diagnostic{}})
+	client, err := h.Client()
+	if err != nil {
+		return err
+	}
+	return client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{URI: uri, Diagnostics: []protocol.Diagnostic{}})
 }
 
 func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) (err error) {
@@ -352,6 +415,11 @@ func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 }
 
 func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text string) error {
+	client, err := h.Client()
+	if err != nil {
+		return err
+	}
+
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
@@ -369,7 +437,7 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 					Message: elem.Message,
 				})
 			}
-			if publishErr := h.client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
+			if publishErr := client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
 				URI:         uri,
 				Diagnostics: diags,
 			}); publishErr != nil {
@@ -400,9 +468,8 @@ func toProtocolRange(position *token.Position) protocol.Range {
 func NewHandler(logger *slog.Logger, importPaths []string) *Handler {
 	//c := compiler.New()
 	return &Handler{
-		logger:      logger,
-		importPaths: importPaths,
-		// client:           client,
+		logger:           logger,
+		importPaths:      importPaths,
 		fileToContentMap: make(map[string][]byte),
 		parsedMap:        make(map[string][]ast.Statement),
 	}
@@ -459,6 +526,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_foldingRangeProvider{Value: true}, nil),
 			HoverProvider: lo.Ternary(AssertInterface[lspabst.CanHover](h),
 				&protocol.Or_ServerCapabilities_hoverProvider{Value: true}, nil),
+			InlayHintProvider: lo.Ternary(AssertInterface[lspabst.CanInlayHint](h),
+				&protocol.Or_ServerCapabilities_inlayHintProvider{Value: true}, nil),
 			// DefinitionProvider: true,
 			// CompletionProvider: &protocol.CompletionOptions{},
 		}}, nil
