@@ -6,7 +6,7 @@ import (
     "context"
     "log/slog"
 
-    "go.lsp.dev/protocol"
+    "github.com/apstndb/go-lsp-export/protocol"
 )
 
 var _ context.Context
@@ -26,7 +26,7 @@ var _ protocol.Server = interface {
 {{range exported .Types}}
     {{- if (eq .Name "Server")}}{{range (interface .).Methods}}
             type Can{{.Name}} interface {
-                {{.Name}}{{mustRegexReplaceAll `^func|go\.lsp\.dev/` .Signature.String ""}}
+                {{.Name}}{{regexReplaceAll `^func|github\.com/apstndb/go-lsp-export/` .Signature.String ""}}
             }
 
     {{end}}{{end -}}
@@ -36,7 +36,7 @@ var _ protocol.Server = interface {
 {{range exported .Types}}
     {{- if (eq .Name "Server")}}
         {{range (interface .).Methods}}
-            func (s *Wrapper) {{.Name}}{{mustRegexReplaceAll `^func|go\.lsp\.dev/` .Signature.String ""}} {
+            func (s *Wrapper) {{.Name}}{{regexReplaceAll `^func|github\.com/apstndb/go-lsp-export/` .Signature.String ""}} {
                 s.logger.Info("{{.Name}}",
                     {{- range .Signature.Params -}}
                         slog.Any("{{.Name}}", {{.Name}}),
@@ -46,8 +46,8 @@ var _ protocol.Server = interface {
                     return {{repeat (.Signature.Results | len) "nil," | trimSuffix ","}}
                 } else {
                     return s.{{.Name}}(
-                        {{- range $index, $element := .Signature.Params -}}
-                            {{$element.Name}},
+                        {{- range .Signature.Params -}}
+                            {{.Name}},
                         {{- end -}}
                     )
                 }

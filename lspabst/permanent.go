@@ -3,7 +3,7 @@ package lspabst
 import (
 	"log/slog"
 
-	"go.lsp.dev/protocol"
+	protocol "github.com/apstndb/go-lsp-export/protocol"
 )
 
 func New(handler any, logger *slog.Logger) *Wrapper {

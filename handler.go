@@ -14,7 +14,8 @@ import (
 	"github.com/cloudspannerecosystem/memefish/ast"
 	"github.com/cloudspannerecosystem/memefish/token"
 	"github.com/samber/lo"
-	"go.lsp.dev/protocol"
+
+	"github.com/apstndb/go-lsp-export/protocol"
 
 	"github.com/apstndb/memefish-lsp/lspabst"
 	"github.com/apstndb/memefish-lsp/memewalk"
@@ -45,6 +46,9 @@ type Handler struct {
 	afterShutdown bool
 }
 
+func (h *Handler) SetClient(client protocol.Client) {
+	h.client = client
+}
 func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
 	//TODO implement me
 	panic("implement me")
@@ -67,13 +71,13 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 	defer h.fileContentMu.Unlock()
 
 	posParam := params.TextDocumentPositionParams
-	filename := posParam.TextDocument.URI.Filename()
+	Path := posParam.TextDocument.URI.Path()
 
 	pos := posParam.Position
 
-	lex := newLexer(filename, string(h.fileToContentMap[filename]))
+	lex := newLexer(Path, string(h.fileToContentMap[Path]))
 
-	stmts := h.parsedMap[filename]
+	stmts := h.parsedMap[Path]
 
 	path := findNodesByPos(h.logger, lex, stmts, pos)
 
@@ -99,7 +103,7 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 			Kind:  protocol.Markdown,
 			Value: buf.String(),
 		},
-		Range: &protocol.Range{
+		Range: protocol.Range{
 			Start: protocol.Position{
 				Line:      uint32(position.Line),
 				Character: uint32(position.Column),
@@ -160,7 +164,7 @@ func toFoldingRange(position *token.Position, kind protocol.FoldingRangeKind) pr
 		StartCharacter: uint32(position.Column),
 		EndLine:        uint32(position.EndLine),
 		EndCharacter:   uint32(position.EndColumn),
-		Kind:           kind,
+		Kind:           string(kind),
 	}
 }
 
@@ -173,16 +177,16 @@ func positionByNode(lex *memefish.Lexer, node ast.Node) *token.Position {
 }
 
 func (h *Handler) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error) {
-	filename := params.TextDocument.URI.Filename()
+	Path := params.TextDocument.URI.Path()
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
-	b := h.fileToContentMap[filename]
-	lex := newLexer(filename, string(b))
+	b := h.fileToContentMap[Path]
+	lex := newLexer(Path, string(b))
 	for tok, _ := range gsqlutils.LexerSeq(lex) {
 		for _, comment := range tok.Comments {
 			if strings.HasPrefix(comment.Raw, "/*") {
-				result = append(result, toFoldingRange(lex.Position(comment.Pos, comment.End), protocol.CommentFoldingRange))
+				result = append(result, toFoldingRange(lex.Position(comment.Pos, comment.End), protocol.Comment))
 			}
 		}
 	}
@@ -190,22 +194,22 @@ func (h *Handler) FoldingRanges(ctx context.Context, params *protocol.FoldingRan
 	visitorFunc := func(path []string, node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.CTE:
-			result = append(result, toFoldingRangeByNode(lex, n.QueryExpr, protocol.RegionFoldingRange))
+			result = append(result, toFoldingRangeByNode(lex, n.QueryExpr, protocol.Region))
 		case *ast.ArraySubQuery:
-			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.Region))
 		case *ast.SubQueryTableExpr:
-			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.Region))
 		case *ast.ParenTableExpr:
-			result = append(result, toFoldingRangeByNode(lex, n.Source, protocol.RegionFoldingRange))
+			result = append(result, toFoldingRangeByNode(lex, n.Source, protocol.Region))
 		case *ast.ScalarSubQuery:
-			result = append(result, toFoldingRange(lex.Position(n.Lparen+1, n.Rparen), protocol.RegionFoldingRange))
+			result = append(result, toFoldingRange(lex.Position(n.Lparen+1, n.Rparen), protocol.Region))
 		case *ast.SubQuery:
-			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.RegionFoldingRange))
+			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.Region))
 		default:
 		}
 		return true
 	}
-	stmts := h.parsedMap[filename]
+	stmts := h.parsedMap[Path]
 	memewalk.InspectSlice(stmts, visitorFunc)
 
 	return result, nil
@@ -233,17 +237,17 @@ func newLexer(filepath, s string) *memefish.Lexer {
 func kindToSemanticTokenTypes(kind token.TokenKind) protocol.SemanticTokenTypes {
 	switch kind {
 	case token.TokenParam:
-		return protocol.SemanticTokenParameter
+		return protocol.ParameterType
 	case token.TokenIdent:
-		return protocol.SemanticTokenVariable
+		return protocol.VariableType
 	case token.TokenInt, token.TokenFloat:
-		return protocol.SemanticTokenNumber
+		return protocol.NumberType
 	case token.TokenString, token.TokenBytes:
-		return protocol.SemanticTokenString
+		return protocol.StringType
 	case token.TokenBad:
 	default:
 		if regexp.MustCompile(`^[a-zA-Z]`).MatchString(string(kind)) {
-			return protocol.SemanticTokenKeyword
+			return protocol.KeywordType
 		}
 	}
 	return protocol.SemanticTokenTypes("")
@@ -251,8 +255,8 @@ func kindToSemanticTokenTypes(kind token.TokenKind) protocol.SemanticTokenTypes 
 
 func (h *Handler) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (result *protocol.SemanticTokens, err error) {
 	var data []uint32
-	filepath := params.TextDocument.URI.Filename()
-	s := string(h.fileToContentMap[params.TextDocument.URI.Filename()])
+	filepath := params.TextDocument.URI.Path()
+	s := string(h.fileToContentMap[params.TextDocument.URI.Path()])
 
 	type semanticToken struct {
 		Line, Col, Length int
@@ -276,7 +280,7 @@ loop:
 
 		for _, comment := range tok.Comments {
 			pos := lex.Position(comment.Pos, comment.End)
-			tokens = append(tokens, semanticToken{pos.Line, pos.Column, len(comment.Raw), protocol.SemanticTokenComment, nil})
+			tokens = append(tokens, semanticToken{pos.Line, pos.Column, len(comment.Raw), protocol.CommentType, nil})
 		}
 
 		if tok.Kind == token.TokenEOF {
@@ -351,10 +355,10 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
-	h.fileToContentMap[uri.Filename()] = []byte(text)
+	h.fileToContentMap[uri.Path()] = []byte(text)
 
-	parsed, err := memefish.ParseStatements(uri.Filename(), text)
-	h.parsedMap[uri.Filename()] = parsed
+	parsed, err := memefish.ParseStatements(uri.Path(), text)
+	h.parsedMap[uri.Path()] = parsed
 
 	if err != nil {
 		if e, ok := lo.ErrorsAs[memefish.MultiError](err); ok {
@@ -393,12 +397,12 @@ func toProtocolRange(position *token.Position) protocol.Range {
 	}
 }
 
-func NewHandler(client protocol.Client, logger *slog.Logger, importPaths []string) *Handler {
+func NewHandler(logger *slog.Logger, importPaths []string) *Handler {
 	//c := compiler.New()
 	return &Handler{
-		logger:           logger,
-		importPaths:      importPaths,
-		client:           client,
+		logger:      logger,
+		importPaths: importPaths,
+		// client:           client,
 		fileToContentMap: make(map[string][]byte),
 		parsedMap:        make(map[string][]ast.Statement),
 	}
@@ -421,9 +425,9 @@ func sliceToMap[K comparable, V, Elem any](s []Elem, f func(index int, elem Elem
 	return result
 }
 
-func (h *Handler) Initialize(ctx context.Context, params *protocol.InitializeParams) (*protocol.InitializeResult, error) {
-	textDocument := lo.FromPtr(params.Capabilities.TextDocument)
-	semanticTokens := lo.FromPtr(textDocument.SemanticTokens)
+func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitialize) (*protocol.InitializeResult, error) {
+	textDocument := params.Capabilities.TextDocument
+	semanticTokens := textDocument.SemanticTokens
 
 	tokenTypes := StringsTo[protocol.SemanticTokenTypes](semanticTokens.TokenTypes)
 	h.tokenTypeMap = sliceToMap(tokenTypes, func(index int, elem protocol.SemanticTokenTypes) (protocol.SemanticTokenTypes, uint32) {
@@ -443,16 +447,18 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.InitializePar
 	return &protocol.InitializeResult{
 		ServerInfo: &protocol.ServerInfo{},
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h), protocol.TextDocumentSyncKindFull, protocol.TextDocumentSyncKindNone),
+			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h), protocol.Full, protocol.None),
 			SemanticTokensProvider: map[string]any{
 				"legend": protocol.SemanticTokensLegend{
-					TokenTypes:     tokenTypes,
-					TokenModifiers: tokenModifiers,
+					TokenTypes:     semanticTokens.TokenTypes,
+					TokenModifiers: semanticTokens.TokenModifiers,
 				},
 				"full": true,
 			},
-			FoldingRangeProvider: AssertInterface[lspabst.CanFoldingRanges](h),
-			HoverProvider:        AssertInterface[lspabst.CanHover](h),
+			FoldingRangeProvider: lo.Ternary(AssertInterface[lspabst.CanFoldingRange](h),
+				&protocol.Or_ServerCapabilities_foldingRangeProvider{Value: true}, nil),
+			HoverProvider: lo.Ternary(AssertInterface[lspabst.CanHover](h),
+				&protocol.Or_ServerCapabilities_hoverProvider{Value: true}, nil),
 			// DefinitionProvider: true,
 			// CompletionProvider: &protocol.CompletionOptions{},
 		}}, nil

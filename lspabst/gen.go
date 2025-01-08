@@ -6,7 +6,7 @@ import (
 	"context"
 	"log/slog"
 
-	"go.lsp.dev/protocol"
+	"github.com/apstndb/go-lsp-export/protocol"
 )
 
 var _ context.Context
@@ -15,57 +15,71 @@ var _ context.Context
 var _ protocol.Server = interface {
 	CanCodeAction
 	CanCodeLens
-	CanCodeLensRefresh
-	CanCodeLensResolve
 	CanColorPresentation
 	CanCompletion
-	CanCompletionResolve
 	CanDeclaration
 	CanDefinition
+	CanDiagnostic
+	CanDiagnosticWorkspace
 	CanDidChange
 	CanDidChangeConfiguration
+	CanDidChangeNotebookDocument
 	CanDidChangeWatchedFiles
 	CanDidChangeWorkspaceFolders
 	CanDidClose
+	CanDidCloseNotebookDocument
 	CanDidCreateFiles
 	CanDidDeleteFiles
 	CanDidOpen
+	CanDidOpenNotebookDocument
 	CanDidRenameFiles
 	CanDidSave
+	CanDidSaveNotebookDocument
 	CanDocumentColor
 	CanDocumentHighlight
 	CanDocumentLink
-	CanDocumentLinkResolve
 	CanDocumentSymbol
 	CanExecuteCommand
 	CanExit
-	CanFoldingRanges
+	CanFoldingRange
 	CanFormatting
 	CanHover
 	CanImplementation
 	CanIncomingCalls
 	CanInitialize
 	CanInitialized
+	CanInlayHint
+	CanInlineCompletion
+	CanInlineValue
 	CanLinkedEditingRange
-	CanLogTrace
 	CanMoniker
 	CanOnTypeFormatting
 	CanOutgoingCalls
 	CanPrepareCallHierarchy
 	CanPrepareRename
+	CanPrepareTypeHierarchy
+	CanProgress
 	CanRangeFormatting
+	CanRangesFormatting
 	CanReferences
 	CanRename
-	CanRequest
+	CanResolve
+	CanResolveCodeAction
+	CanResolveCodeLens
+	CanResolveCompletionItem
+	CanResolveDocumentLink
+	CanResolveWorkspaceSymbol
+	CanSelectionRange
 	CanSemanticTokensFull
 	CanSemanticTokensFullDelta
 	CanSemanticTokensRange
-	CanSemanticTokensRefresh
 	CanSetTrace
-	CanShowDocument
 	CanShutdown
 	CanSignatureHelp
-	CanSymbols
+	CanSubtypes
+	CanSupertypes
+	CanSymbol
+	CanTextDocumentContent
 	CanTypeDefinition
 	CanWillCreateFiles
 	CanWillDeleteFiles
@@ -78,248 +92,304 @@ var _ protocol.Server = interface {
 // Generate Can* interfaces
 
 type CanCodeAction interface {
-	CodeAction(ctx context.Context, params *protocol.CodeActionParams) (result []protocol.CodeAction, err error)
+	CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error)
 }
 
 type CanCodeLens interface {
-	CodeLens(ctx context.Context, params *protocol.CodeLensParams) (result []protocol.CodeLens, err error)
-}
-
-type CanCodeLensRefresh interface {
-	CodeLensRefresh(ctx context.Context) (err error)
-}
-
-type CanCodeLensResolve interface {
-	CodeLensResolve(ctx context.Context, params *protocol.CodeLens) (result *protocol.CodeLens, err error)
+	CodeLens(ctx context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error)
 }
 
 type CanColorPresentation interface {
-	ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) (result []protocol.ColorPresentation, err error)
+	ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) ([]protocol.ColorPresentation, error)
 }
 
 type CanCompletion interface {
-	Completion(ctx context.Context, params *protocol.CompletionParams) (result *protocol.CompletionList, err error)
-}
-
-type CanCompletionResolve interface {
-	CompletionResolve(ctx context.Context, params *protocol.CompletionItem) (result *protocol.CompletionItem, err error)
+	Completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error)
 }
 
 type CanDeclaration interface {
-	Declaration(ctx context.Context, params *protocol.DeclarationParams) (result []protocol.Location, err error)
+	Declaration(ctx context.Context, params *protocol.DeclarationParams) (*protocol.Or_textDocument_declaration, error)
 }
 
 type CanDefinition interface {
-	Definition(ctx context.Context, params *protocol.DefinitionParams) (result []protocol.Location, err error)
+	Definition(ctx context.Context, params *protocol.DefinitionParams) ([]protocol.Location, error)
+}
+
+type CanDiagnostic interface {
+	Diagnostic(ctx context.Context, params *protocol.DocumentDiagnosticParams) (*protocol.DocumentDiagnosticReport, error)
+}
+
+type CanDiagnosticWorkspace interface {
+	DiagnosticWorkspace(ctx context.Context, params *protocol.WorkspaceDiagnosticParams) (*protocol.WorkspaceDiagnosticReport, error)
 }
 
 type CanDidChange interface {
-	DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) (err error)
+	DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error
 }
 
 type CanDidChangeConfiguration interface {
-	DidChangeConfiguration(ctx context.Context, params *protocol.DidChangeConfigurationParams) (err error)
+	DidChangeConfiguration(ctx context.Context, params *protocol.DidChangeConfigurationParams) error
+}
+
+type CanDidChangeNotebookDocument interface {
+	DidChangeNotebookDocument(ctx context.Context, params *protocol.DidChangeNotebookDocumentParams) error
 }
 
 type CanDidChangeWatchedFiles interface {
-	DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) (err error)
+	DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) error
 }
 
 type CanDidChangeWorkspaceFolders interface {
-	DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) (err error)
+	DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error
 }
 
 type CanDidClose interface {
-	DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error)
+	DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error
+}
+
+type CanDidCloseNotebookDocument interface {
+	DidCloseNotebookDocument(ctx context.Context, params *protocol.DidCloseNotebookDocumentParams) error
 }
 
 type CanDidCreateFiles interface {
-	DidCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (err error)
+	DidCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) error
 }
 
 type CanDidDeleteFiles interface {
-	DidDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (err error)
+	DidDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) error
 }
 
 type CanDidOpen interface {
-	DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) (err error)
+	DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error
+}
+
+type CanDidOpenNotebookDocument interface {
+	DidOpenNotebookDocument(ctx context.Context, params *protocol.DidOpenNotebookDocumentParams) error
 }
 
 type CanDidRenameFiles interface {
-	DidRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (err error)
+	DidRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) error
 }
 
 type CanDidSave interface {
-	DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) (err error)
+	DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error
+}
+
+type CanDidSaveNotebookDocument interface {
+	DidSaveNotebookDocument(ctx context.Context, params *protocol.DidSaveNotebookDocumentParams) error
 }
 
 type CanDocumentColor interface {
-	DocumentColor(ctx context.Context, params *protocol.DocumentColorParams) (result []protocol.ColorInformation, err error)
+	DocumentColor(ctx context.Context, params *protocol.DocumentColorParams) ([]protocol.ColorInformation, error)
 }
 
 type CanDocumentHighlight interface {
-	DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) (result []protocol.DocumentHighlight, err error)
+	DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error)
 }
 
 type CanDocumentLink interface {
-	DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) (result []protocol.DocumentLink, err error)
-}
-
-type CanDocumentLinkResolve interface {
-	DocumentLinkResolve(ctx context.Context, params *protocol.DocumentLink) (result *protocol.DocumentLink, err error)
+	DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) ([]protocol.DocumentLink, error)
 }
 
 type CanDocumentSymbol interface {
-	DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (result []interface{}, err error)
+	DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]interface{}, error)
 }
 
 type CanExecuteCommand interface {
-	ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (result interface{}, err error)
+	ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (interface{}, error)
 }
 
 type CanExit interface {
-	Exit(ctx context.Context) (err error)
+	Exit(ctx context.Context) error
 }
 
-type CanFoldingRanges interface {
-	FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error)
+type CanFoldingRange interface {
+	FoldingRange(ctx context.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error)
 }
 
 type CanFormatting interface {
-	Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) (result []protocol.TextEdit, err error)
+	Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error)
 }
 
 type CanHover interface {
-	Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error)
+	Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error)
 }
 
 type CanImplementation interface {
-	Implementation(ctx context.Context, params *protocol.ImplementationParams) (result []protocol.Location, err error)
+	Implementation(ctx context.Context, params *protocol.ImplementationParams) ([]protocol.Location, error)
 }
 
 type CanIncomingCalls interface {
-	IncomingCalls(ctx context.Context, params *protocol.CallHierarchyIncomingCallsParams) (result []protocol.CallHierarchyIncomingCall, err error)
+	IncomingCalls(ctx context.Context, params *protocol.CallHierarchyIncomingCallsParams) ([]protocol.CallHierarchyIncomingCall, error)
 }
 
 type CanInitialize interface {
-	Initialize(ctx context.Context, params *protocol.InitializeParams) (result *protocol.InitializeResult, err error)
+	Initialize(ctx context.Context, params *protocol.ParamInitialize) (*protocol.InitializeResult, error)
 }
 
 type CanInitialized interface {
-	Initialized(ctx context.Context, params *protocol.InitializedParams) (err error)
+	Initialized(ctx context.Context, params *protocol.InitializedParams) error
+}
+
+type CanInlayHint interface {
+	InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error)
+}
+
+type CanInlineCompletion interface {
+	InlineCompletion(ctx context.Context, params *protocol.InlineCompletionParams) (*protocol.Or_Result_textDocument_inlineCompletion, error)
+}
+
+type CanInlineValue interface {
+	InlineValue(ctx context.Context, params *protocol.InlineValueParams) ([]protocol.InlineValue, error)
 }
 
 type CanLinkedEditingRange interface {
-	LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (result *protocol.LinkedEditingRanges, err error)
-}
-
-type CanLogTrace interface {
-	LogTrace(ctx context.Context, params *protocol.LogTraceParams) (err error)
+	LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (*protocol.LinkedEditingRanges, error)
 }
 
 type CanMoniker interface {
-	Moniker(ctx context.Context, params *protocol.MonikerParams) (result []protocol.Moniker, err error)
+	Moniker(ctx context.Context, params *protocol.MonikerParams) ([]protocol.Moniker, error)
 }
 
 type CanOnTypeFormatting interface {
-	OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) (result []protocol.TextEdit, err error)
+	OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) ([]protocol.TextEdit, error)
 }
 
 type CanOutgoingCalls interface {
-	OutgoingCalls(ctx context.Context, params *protocol.CallHierarchyOutgoingCallsParams) (result []protocol.CallHierarchyOutgoingCall, err error)
+	OutgoingCalls(ctx context.Context, params *protocol.CallHierarchyOutgoingCallsParams) ([]protocol.CallHierarchyOutgoingCall, error)
 }
 
 type CanPrepareCallHierarchy interface {
-	PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) (result []protocol.CallHierarchyItem, err error)
+	PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) ([]protocol.CallHierarchyItem, error)
 }
 
 type CanPrepareRename interface {
-	PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (result *protocol.Range, err error)
+	PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (*protocol.PrepareRenameResult, error)
+}
+
+type CanPrepareTypeHierarchy interface {
+	PrepareTypeHierarchy(ctx context.Context, params *protocol.TypeHierarchyPrepareParams) ([]protocol.TypeHierarchyItem, error)
+}
+
+type CanProgress interface {
+	Progress(ctx context.Context, params *protocol.ProgressParams) error
 }
 
 type CanRangeFormatting interface {
-	RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) (result []protocol.TextEdit, err error)
+	RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) ([]protocol.TextEdit, error)
+}
+
+type CanRangesFormatting interface {
+	RangesFormatting(ctx context.Context, params *protocol.DocumentRangesFormattingParams) ([]protocol.TextEdit, error)
 }
 
 type CanReferences interface {
-	References(ctx context.Context, params *protocol.ReferenceParams) (result []protocol.Location, err error)
+	References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error)
 }
 
 type CanRename interface {
-	Rename(ctx context.Context, params *protocol.RenameParams) (result *protocol.WorkspaceEdit, err error)
+	Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error)
 }
 
-type CanRequest interface {
-	Request(ctx context.Context, method string, params interface{}) (result interface{}, err error)
+type CanResolve interface {
+	Resolve(ctx context.Context, params *protocol.InlayHint) (*protocol.InlayHint, error)
+}
+
+type CanResolveCodeAction interface {
+	ResolveCodeAction(ctx context.Context, params *protocol.CodeAction) (*protocol.CodeAction, error)
+}
+
+type CanResolveCodeLens interface {
+	ResolveCodeLens(ctx context.Context, params *protocol.CodeLens) (*protocol.CodeLens, error)
+}
+
+type CanResolveCompletionItem interface {
+	ResolveCompletionItem(ctx context.Context, params *protocol.CompletionItem) (*protocol.CompletionItem, error)
+}
+
+type CanResolveDocumentLink interface {
+	ResolveDocumentLink(ctx context.Context, params *protocol.DocumentLink) (*protocol.DocumentLink, error)
+}
+
+type CanResolveWorkspaceSymbol interface {
+	ResolveWorkspaceSymbol(ctx context.Context, params *protocol.WorkspaceSymbol) (*protocol.WorkspaceSymbol, error)
+}
+
+type CanSelectionRange interface {
+	SelectionRange(ctx context.Context, params *protocol.SelectionRangeParams) ([]protocol.SelectionRange, error)
 }
 
 type CanSemanticTokensFull interface {
-	SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (result *protocol.SemanticTokens, err error)
+	SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error)
 }
 
 type CanSemanticTokensFullDelta interface {
-	SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (result interface{}, err error)
+	SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (interface{}, error)
 }
 
 type CanSemanticTokensRange interface {
-	SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (result *protocol.SemanticTokens, err error)
-}
-
-type CanSemanticTokensRefresh interface {
-	SemanticTokensRefresh(ctx context.Context) (err error)
+	SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error)
 }
 
 type CanSetTrace interface {
-	SetTrace(ctx context.Context, params *protocol.SetTraceParams) (err error)
-}
-
-type CanShowDocument interface {
-	ShowDocument(ctx context.Context, params *protocol.ShowDocumentParams) (result *protocol.ShowDocumentResult, err error)
+	SetTrace(ctx context.Context, params *protocol.SetTraceParams) error
 }
 
 type CanShutdown interface {
-	Shutdown(ctx context.Context) (err error)
+	Shutdown(ctx context.Context) error
 }
 
 type CanSignatureHelp interface {
-	SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error)
+	SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error)
 }
 
-type CanSymbols interface {
-	Symbols(ctx context.Context, params *protocol.WorkspaceSymbolParams) (result []protocol.SymbolInformation, err error)
+type CanSubtypes interface {
+	Subtypes(ctx context.Context, params *protocol.TypeHierarchySubtypesParams) ([]protocol.TypeHierarchyItem, error)
+}
+
+type CanSupertypes interface {
+	Supertypes(ctx context.Context, params *protocol.TypeHierarchySupertypesParams) ([]protocol.TypeHierarchyItem, error)
+}
+
+type CanSymbol interface {
+	Symbol(ctx context.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error)
+}
+
+type CanTextDocumentContent interface {
+	TextDocumentContent(ctx context.Context, params *protocol.TextDocumentContentParams) (*string, error)
 }
 
 type CanTypeDefinition interface {
-	TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) (result []protocol.Location, err error)
+	TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error)
 }
 
 type CanWillCreateFiles interface {
-	WillCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (result *protocol.WorkspaceEdit, err error)
+	WillCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (*protocol.WorkspaceEdit, error)
 }
 
 type CanWillDeleteFiles interface {
-	WillDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (result *protocol.WorkspaceEdit, err error)
+	WillDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (*protocol.WorkspaceEdit, error)
 }
 
 type CanWillRenameFiles interface {
-	WillRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (result *protocol.WorkspaceEdit, err error)
+	WillRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (*protocol.WorkspaceEdit, error)
 }
 
 type CanWillSave interface {
-	WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (err error)
+	WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) error
 }
 
 type CanWillSaveWaitUntil interface {
-	WillSaveWaitUntil(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (result []protocol.TextEdit, err error)
+	WillSaveWaitUntil(ctx context.Context, params *protocol.WillSaveTextDocumentParams) ([]protocol.TextEdit, error)
 }
 
 type CanWorkDoneProgressCancel interface {
-	WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) (err error)
+	WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) error
 }
 
 // Generate wrapper methods for *Wrapper
 
-func (s *Wrapper) CodeAction(ctx context.Context, params *protocol.CodeActionParams) (result []protocol.CodeAction, err error) {
+func (s *Wrapper) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
 	s.logger.Info("CodeAction", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanCodeAction); !ok {
 		return nil, nil
@@ -328,7 +398,7 @@ func (s *Wrapper) CodeAction(ctx context.Context, params *protocol.CodeActionPar
 	}
 }
 
-func (s *Wrapper) CodeLens(ctx context.Context, params *protocol.CodeLensParams) (result []protocol.CodeLens, err error) {
+func (s *Wrapper) CodeLens(ctx context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
 	s.logger.Info("CodeLens", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanCodeLens); !ok {
 		return nil, nil
@@ -337,25 +407,7 @@ func (s *Wrapper) CodeLens(ctx context.Context, params *protocol.CodeLensParams)
 	}
 }
 
-func (s *Wrapper) CodeLensRefresh(ctx context.Context) (err error) {
-	s.logger.Info("CodeLensRefresh", slog.Any("ctx", ctx))
-	if s, ok := s.handler.(CanCodeLensRefresh); !ok {
-		return nil
-	} else {
-		return s.CodeLensRefresh(ctx)
-	}
-}
-
-func (s *Wrapper) CodeLensResolve(ctx context.Context, params *protocol.CodeLens) (result *protocol.CodeLens, err error) {
-	s.logger.Info("CodeLensResolve", slog.Any("ctx", ctx), slog.Any("params", params))
-	if s, ok := s.handler.(CanCodeLensResolve); !ok {
-		return nil, nil
-	} else {
-		return s.CodeLensResolve(ctx, params)
-	}
-}
-
-func (s *Wrapper) ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) (result []protocol.ColorPresentation, err error) {
+func (s *Wrapper) ColorPresentation(ctx context.Context, params *protocol.ColorPresentationParams) ([]protocol.ColorPresentation, error) {
 	s.logger.Info("ColorPresentation", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanColorPresentation); !ok {
 		return nil, nil
@@ -364,7 +416,7 @@ func (s *Wrapper) ColorPresentation(ctx context.Context, params *protocol.ColorP
 	}
 }
 
-func (s *Wrapper) Completion(ctx context.Context, params *protocol.CompletionParams) (result *protocol.CompletionList, err error) {
+func (s *Wrapper) Completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
 	s.logger.Info("Completion", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanCompletion); !ok {
 		return nil, nil
@@ -373,16 +425,7 @@ func (s *Wrapper) Completion(ctx context.Context, params *protocol.CompletionPar
 	}
 }
 
-func (s *Wrapper) CompletionResolve(ctx context.Context, params *protocol.CompletionItem) (result *protocol.CompletionItem, err error) {
-	s.logger.Info("CompletionResolve", slog.Any("ctx", ctx), slog.Any("params", params))
-	if s, ok := s.handler.(CanCompletionResolve); !ok {
-		return nil, nil
-	} else {
-		return s.CompletionResolve(ctx, params)
-	}
-}
-
-func (s *Wrapper) Declaration(ctx context.Context, params *protocol.DeclarationParams) (result []protocol.Location, err error) {
+func (s *Wrapper) Declaration(ctx context.Context, params *protocol.DeclarationParams) (*protocol.Or_textDocument_declaration, error) {
 	s.logger.Info("Declaration", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDeclaration); !ok {
 		return nil, nil
@@ -391,7 +434,7 @@ func (s *Wrapper) Declaration(ctx context.Context, params *protocol.DeclarationP
 	}
 }
 
-func (s *Wrapper) Definition(ctx context.Context, params *protocol.DefinitionParams) (result []protocol.Location, err error) {
+func (s *Wrapper) Definition(ctx context.Context, params *protocol.DefinitionParams) ([]protocol.Location, error) {
 	s.logger.Info("Definition", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDefinition); !ok {
 		return nil, nil
@@ -400,7 +443,25 @@ func (s *Wrapper) Definition(ctx context.Context, params *protocol.DefinitionPar
 	}
 }
 
-func (s *Wrapper) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) (err error) {
+func (s *Wrapper) Diagnostic(ctx context.Context, params *protocol.DocumentDiagnosticParams) (*protocol.DocumentDiagnosticReport, error) {
+	s.logger.Info("Diagnostic", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanDiagnostic); !ok {
+		return nil, nil
+	} else {
+		return s.Diagnostic(ctx, params)
+	}
+}
+
+func (s *Wrapper) DiagnosticWorkspace(ctx context.Context, params *protocol.WorkspaceDiagnosticParams) (*protocol.WorkspaceDiagnosticReport, error) {
+	s.logger.Info("DiagnosticWorkspace", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanDiagnosticWorkspace); !ok {
+		return nil, nil
+	} else {
+		return s.DiagnosticWorkspace(ctx, params)
+	}
+}
+
+func (s *Wrapper) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) error {
 	s.logger.Info("DidChange", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidChange); !ok {
 		return nil
@@ -409,7 +470,7 @@ func (s *Wrapper) DidChange(ctx context.Context, params *protocol.DidChangeTextD
 	}
 }
 
-func (s *Wrapper) DidChangeConfiguration(ctx context.Context, params *protocol.DidChangeConfigurationParams) (err error) {
+func (s *Wrapper) DidChangeConfiguration(ctx context.Context, params *protocol.DidChangeConfigurationParams) error {
 	s.logger.Info("DidChangeConfiguration", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidChangeConfiguration); !ok {
 		return nil
@@ -418,7 +479,16 @@ func (s *Wrapper) DidChangeConfiguration(ctx context.Context, params *protocol.D
 	}
 }
 
-func (s *Wrapper) DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) (err error) {
+func (s *Wrapper) DidChangeNotebookDocument(ctx context.Context, params *protocol.DidChangeNotebookDocumentParams) error {
+	s.logger.Info("DidChangeNotebookDocument", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanDidChangeNotebookDocument); !ok {
+		return nil
+	} else {
+		return s.DidChangeNotebookDocument(ctx, params)
+	}
+}
+
+func (s *Wrapper) DidChangeWatchedFiles(ctx context.Context, params *protocol.DidChangeWatchedFilesParams) error {
 	s.logger.Info("DidChangeWatchedFiles", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidChangeWatchedFiles); !ok {
 		return nil
@@ -427,7 +497,7 @@ func (s *Wrapper) DidChangeWatchedFiles(ctx context.Context, params *protocol.Di
 	}
 }
 
-func (s *Wrapper) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) (err error) {
+func (s *Wrapper) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
 	s.logger.Info("DidChangeWorkspaceFolders", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidChangeWorkspaceFolders); !ok {
 		return nil
@@ -436,7 +506,7 @@ func (s *Wrapper) DidChangeWorkspaceFolders(ctx context.Context, params *protoco
 	}
 }
 
-func (s *Wrapper) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error) {
+func (s *Wrapper) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) error {
 	s.logger.Info("DidClose", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidClose); !ok {
 		return nil
@@ -445,7 +515,16 @@ func (s *Wrapper) DidClose(ctx context.Context, params *protocol.DidCloseTextDoc
 	}
 }
 
-func (s *Wrapper) DidCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (err error) {
+func (s *Wrapper) DidCloseNotebookDocument(ctx context.Context, params *protocol.DidCloseNotebookDocumentParams) error {
+	s.logger.Info("DidCloseNotebookDocument", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanDidCloseNotebookDocument); !ok {
+		return nil
+	} else {
+		return s.DidCloseNotebookDocument(ctx, params)
+	}
+}
+
+func (s *Wrapper) DidCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) error {
 	s.logger.Info("DidCreateFiles", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidCreateFiles); !ok {
 		return nil
@@ -454,7 +533,7 @@ func (s *Wrapper) DidCreateFiles(ctx context.Context, params *protocol.CreateFil
 	}
 }
 
-func (s *Wrapper) DidDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (err error) {
+func (s *Wrapper) DidDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) error {
 	s.logger.Info("DidDeleteFiles", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidDeleteFiles); !ok {
 		return nil
@@ -463,7 +542,7 @@ func (s *Wrapper) DidDeleteFiles(ctx context.Context, params *protocol.DeleteFil
 	}
 }
 
-func (s *Wrapper) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) (err error) {
+func (s *Wrapper) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) error {
 	s.logger.Info("DidOpen", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidOpen); !ok {
 		return nil
@@ -472,7 +551,16 @@ func (s *Wrapper) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocum
 	}
 }
 
-func (s *Wrapper) DidRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (err error) {
+func (s *Wrapper) DidOpenNotebookDocument(ctx context.Context, params *protocol.DidOpenNotebookDocumentParams) error {
+	s.logger.Info("DidOpenNotebookDocument", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanDidOpenNotebookDocument); !ok {
+		return nil
+	} else {
+		return s.DidOpenNotebookDocument(ctx, params)
+	}
+}
+
+func (s *Wrapper) DidRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) error {
 	s.logger.Info("DidRenameFiles", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidRenameFiles); !ok {
 		return nil
@@ -481,7 +569,7 @@ func (s *Wrapper) DidRenameFiles(ctx context.Context, params *protocol.RenameFil
 	}
 }
 
-func (s *Wrapper) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) (err error) {
+func (s *Wrapper) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error {
 	s.logger.Info("DidSave", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDidSave); !ok {
 		return nil
@@ -490,7 +578,16 @@ func (s *Wrapper) DidSave(ctx context.Context, params *protocol.DidSaveTextDocum
 	}
 }
 
-func (s *Wrapper) DocumentColor(ctx context.Context, params *protocol.DocumentColorParams) (result []protocol.ColorInformation, err error) {
+func (s *Wrapper) DidSaveNotebookDocument(ctx context.Context, params *protocol.DidSaveNotebookDocumentParams) error {
+	s.logger.Info("DidSaveNotebookDocument", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanDidSaveNotebookDocument); !ok {
+		return nil
+	} else {
+		return s.DidSaveNotebookDocument(ctx, params)
+	}
+}
+
+func (s *Wrapper) DocumentColor(ctx context.Context, params *protocol.DocumentColorParams) ([]protocol.ColorInformation, error) {
 	s.logger.Info("DocumentColor", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDocumentColor); !ok {
 		return nil, nil
@@ -499,7 +596,7 @@ func (s *Wrapper) DocumentColor(ctx context.Context, params *protocol.DocumentCo
 	}
 }
 
-func (s *Wrapper) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) (result []protocol.DocumentHighlight, err error) {
+func (s *Wrapper) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
 	s.logger.Info("DocumentHighlight", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDocumentHighlight); !ok {
 		return nil, nil
@@ -508,7 +605,7 @@ func (s *Wrapper) DocumentHighlight(ctx context.Context, params *protocol.Docume
 	}
 }
 
-func (s *Wrapper) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) (result []protocol.DocumentLink, err error) {
+func (s *Wrapper) DocumentLink(ctx context.Context, params *protocol.DocumentLinkParams) ([]protocol.DocumentLink, error) {
 	s.logger.Info("DocumentLink", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDocumentLink); !ok {
 		return nil, nil
@@ -517,16 +614,7 @@ func (s *Wrapper) DocumentLink(ctx context.Context, params *protocol.DocumentLin
 	}
 }
 
-func (s *Wrapper) DocumentLinkResolve(ctx context.Context, params *protocol.DocumentLink) (result *protocol.DocumentLink, err error) {
-	s.logger.Info("DocumentLinkResolve", slog.Any("ctx", ctx), slog.Any("params", params))
-	if s, ok := s.handler.(CanDocumentLinkResolve); !ok {
-		return nil, nil
-	} else {
-		return s.DocumentLinkResolve(ctx, params)
-	}
-}
-
-func (s *Wrapper) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) (result []interface{}, err error) {
+func (s *Wrapper) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]interface{}, error) {
 	s.logger.Info("DocumentSymbol", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanDocumentSymbol); !ok {
 		return nil, nil
@@ -535,7 +623,7 @@ func (s *Wrapper) DocumentSymbol(ctx context.Context, params *protocol.DocumentS
 	}
 }
 
-func (s *Wrapper) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (result interface{}, err error) {
+func (s *Wrapper) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (interface{}, error) {
 	s.logger.Info("ExecuteCommand", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanExecuteCommand); !ok {
 		return nil, nil
@@ -544,7 +632,7 @@ func (s *Wrapper) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCo
 	}
 }
 
-func (s *Wrapper) Exit(ctx context.Context) (err error) {
+func (s *Wrapper) Exit(ctx context.Context) error {
 	s.logger.Info("Exit", slog.Any("ctx", ctx))
 	if s, ok := s.handler.(CanExit); !ok {
 		return nil
@@ -553,16 +641,16 @@ func (s *Wrapper) Exit(ctx context.Context) (err error) {
 	}
 }
 
-func (s *Wrapper) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error) {
-	s.logger.Info("FoldingRanges", slog.Any("ctx", ctx), slog.Any("params", params))
-	if s, ok := s.handler.(CanFoldingRanges); !ok {
+func (s *Wrapper) FoldingRange(ctx context.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error) {
+	s.logger.Info("FoldingRange", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanFoldingRange); !ok {
 		return nil, nil
 	} else {
-		return s.FoldingRanges(ctx, params)
+		return s.FoldingRange(ctx, params)
 	}
 }
 
-func (s *Wrapper) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) (result []protocol.TextEdit, err error) {
+func (s *Wrapper) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
 	s.logger.Info("Formatting", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanFormatting); !ok {
 		return nil, nil
@@ -571,7 +659,7 @@ func (s *Wrapper) Formatting(ctx context.Context, params *protocol.DocumentForma
 	}
 }
 
-func (s *Wrapper) Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error) {
+func (s *Wrapper) Hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	s.logger.Info("Hover", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanHover); !ok {
 		return nil, nil
@@ -580,7 +668,7 @@ func (s *Wrapper) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 	}
 }
 
-func (s *Wrapper) Implementation(ctx context.Context, params *protocol.ImplementationParams) (result []protocol.Location, err error) {
+func (s *Wrapper) Implementation(ctx context.Context, params *protocol.ImplementationParams) ([]protocol.Location, error) {
 	s.logger.Info("Implementation", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanImplementation); !ok {
 		return nil, nil
@@ -589,7 +677,7 @@ func (s *Wrapper) Implementation(ctx context.Context, params *protocol.Implement
 	}
 }
 
-func (s *Wrapper) IncomingCalls(ctx context.Context, params *protocol.CallHierarchyIncomingCallsParams) (result []protocol.CallHierarchyIncomingCall, err error) {
+func (s *Wrapper) IncomingCalls(ctx context.Context, params *protocol.CallHierarchyIncomingCallsParams) ([]protocol.CallHierarchyIncomingCall, error) {
 	s.logger.Info("IncomingCalls", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanIncomingCalls); !ok {
 		return nil, nil
@@ -598,7 +686,7 @@ func (s *Wrapper) IncomingCalls(ctx context.Context, params *protocol.CallHierar
 	}
 }
 
-func (s *Wrapper) Initialize(ctx context.Context, params *protocol.InitializeParams) (result *protocol.InitializeResult, err error) {
+func (s *Wrapper) Initialize(ctx context.Context, params *protocol.ParamInitialize) (*protocol.InitializeResult, error) {
 	s.logger.Info("Initialize", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanInitialize); !ok {
 		return nil, nil
@@ -607,7 +695,7 @@ func (s *Wrapper) Initialize(ctx context.Context, params *protocol.InitializePar
 	}
 }
 
-func (s *Wrapper) Initialized(ctx context.Context, params *protocol.InitializedParams) (err error) {
+func (s *Wrapper) Initialized(ctx context.Context, params *protocol.InitializedParams) error {
 	s.logger.Info("Initialized", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanInitialized); !ok {
 		return nil
@@ -616,7 +704,34 @@ func (s *Wrapper) Initialized(ctx context.Context, params *protocol.InitializedP
 	}
 }
 
-func (s *Wrapper) LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (result *protocol.LinkedEditingRanges, err error) {
+func (s *Wrapper) InlayHint(ctx context.Context, params *protocol.InlayHintParams) ([]protocol.InlayHint, error) {
+	s.logger.Info("InlayHint", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanInlayHint); !ok {
+		return nil, nil
+	} else {
+		return s.InlayHint(ctx, params)
+	}
+}
+
+func (s *Wrapper) InlineCompletion(ctx context.Context, params *protocol.InlineCompletionParams) (*protocol.Or_Result_textDocument_inlineCompletion, error) {
+	s.logger.Info("InlineCompletion", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanInlineCompletion); !ok {
+		return nil, nil
+	} else {
+		return s.InlineCompletion(ctx, params)
+	}
+}
+
+func (s *Wrapper) InlineValue(ctx context.Context, params *protocol.InlineValueParams) ([]protocol.InlineValue, error) {
+	s.logger.Info("InlineValue", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanInlineValue); !ok {
+		return nil, nil
+	} else {
+		return s.InlineValue(ctx, params)
+	}
+}
+
+func (s *Wrapper) LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (*protocol.LinkedEditingRanges, error) {
 	s.logger.Info("LinkedEditingRange", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanLinkedEditingRange); !ok {
 		return nil, nil
@@ -625,16 +740,7 @@ func (s *Wrapper) LinkedEditingRange(ctx context.Context, params *protocol.Linke
 	}
 }
 
-func (s *Wrapper) LogTrace(ctx context.Context, params *protocol.LogTraceParams) (err error) {
-	s.logger.Info("LogTrace", slog.Any("ctx", ctx), slog.Any("params", params))
-	if s, ok := s.handler.(CanLogTrace); !ok {
-		return nil
-	} else {
-		return s.LogTrace(ctx, params)
-	}
-}
-
-func (s *Wrapper) Moniker(ctx context.Context, params *protocol.MonikerParams) (result []protocol.Moniker, err error) {
+func (s *Wrapper) Moniker(ctx context.Context, params *protocol.MonikerParams) ([]protocol.Moniker, error) {
 	s.logger.Info("Moniker", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanMoniker); !ok {
 		return nil, nil
@@ -643,7 +749,7 @@ func (s *Wrapper) Moniker(ctx context.Context, params *protocol.MonikerParams) (
 	}
 }
 
-func (s *Wrapper) OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) (result []protocol.TextEdit, err error) {
+func (s *Wrapper) OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) ([]protocol.TextEdit, error) {
 	s.logger.Info("OnTypeFormatting", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanOnTypeFormatting); !ok {
 		return nil, nil
@@ -652,7 +758,7 @@ func (s *Wrapper) OnTypeFormatting(ctx context.Context, params *protocol.Documen
 	}
 }
 
-func (s *Wrapper) OutgoingCalls(ctx context.Context, params *protocol.CallHierarchyOutgoingCallsParams) (result []protocol.CallHierarchyOutgoingCall, err error) {
+func (s *Wrapper) OutgoingCalls(ctx context.Context, params *protocol.CallHierarchyOutgoingCallsParams) ([]protocol.CallHierarchyOutgoingCall, error) {
 	s.logger.Info("OutgoingCalls", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanOutgoingCalls); !ok {
 		return nil, nil
@@ -661,7 +767,7 @@ func (s *Wrapper) OutgoingCalls(ctx context.Context, params *protocol.CallHierar
 	}
 }
 
-func (s *Wrapper) PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) (result []protocol.CallHierarchyItem, err error) {
+func (s *Wrapper) PrepareCallHierarchy(ctx context.Context, params *protocol.CallHierarchyPrepareParams) ([]protocol.CallHierarchyItem, error) {
 	s.logger.Info("PrepareCallHierarchy", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanPrepareCallHierarchy); !ok {
 		return nil, nil
@@ -670,7 +776,7 @@ func (s *Wrapper) PrepareCallHierarchy(ctx context.Context, params *protocol.Cal
 	}
 }
 
-func (s *Wrapper) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (result *protocol.Range, err error) {
+func (s *Wrapper) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (*protocol.PrepareRenameResult, error) {
 	s.logger.Info("PrepareRename", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanPrepareRename); !ok {
 		return nil, nil
@@ -679,7 +785,25 @@ func (s *Wrapper) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 	}
 }
 
-func (s *Wrapper) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) (result []protocol.TextEdit, err error) {
+func (s *Wrapper) PrepareTypeHierarchy(ctx context.Context, params *protocol.TypeHierarchyPrepareParams) ([]protocol.TypeHierarchyItem, error) {
+	s.logger.Info("PrepareTypeHierarchy", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanPrepareTypeHierarchy); !ok {
+		return nil, nil
+	} else {
+		return s.PrepareTypeHierarchy(ctx, params)
+	}
+}
+
+func (s *Wrapper) Progress(ctx context.Context, params *protocol.ProgressParams) error {
+	s.logger.Info("Progress", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanProgress); !ok {
+		return nil
+	} else {
+		return s.Progress(ctx, params)
+	}
+}
+
+func (s *Wrapper) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) ([]protocol.TextEdit, error) {
 	s.logger.Info("RangeFormatting", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanRangeFormatting); !ok {
 		return nil, nil
@@ -688,7 +812,16 @@ func (s *Wrapper) RangeFormatting(ctx context.Context, params *protocol.Document
 	}
 }
 
-func (s *Wrapper) References(ctx context.Context, params *protocol.ReferenceParams) (result []protocol.Location, err error) {
+func (s *Wrapper) RangesFormatting(ctx context.Context, params *protocol.DocumentRangesFormattingParams) ([]protocol.TextEdit, error) {
+	s.logger.Info("RangesFormatting", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanRangesFormatting); !ok {
+		return nil, nil
+	} else {
+		return s.RangesFormatting(ctx, params)
+	}
+}
+
+func (s *Wrapper) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
 	s.logger.Info("References", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanReferences); !ok {
 		return nil, nil
@@ -697,7 +830,7 @@ func (s *Wrapper) References(ctx context.Context, params *protocol.ReferencePara
 	}
 }
 
-func (s *Wrapper) Rename(ctx context.Context, params *protocol.RenameParams) (result *protocol.WorkspaceEdit, err error) {
+func (s *Wrapper) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	s.logger.Info("Rename", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanRename); !ok {
 		return nil, nil
@@ -706,16 +839,70 @@ func (s *Wrapper) Rename(ctx context.Context, params *protocol.RenameParams) (re
 	}
 }
 
-func (s *Wrapper) Request(ctx context.Context, method string, params interface{}) (result interface{}, err error) {
-	s.logger.Info("Request", slog.Any("ctx", ctx), slog.Any("method", method), slog.Any("params", params))
-	if s, ok := s.handler.(CanRequest); !ok {
+func (s *Wrapper) Resolve(ctx context.Context, params *protocol.InlayHint) (*protocol.InlayHint, error) {
+	s.logger.Info("Resolve", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanResolve); !ok {
 		return nil, nil
 	} else {
-		return s.Request(ctx, method, params)
+		return s.Resolve(ctx, params)
 	}
 }
 
-func (s *Wrapper) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (result *protocol.SemanticTokens, err error) {
+func (s *Wrapper) ResolveCodeAction(ctx context.Context, params *protocol.CodeAction) (*protocol.CodeAction, error) {
+	s.logger.Info("ResolveCodeAction", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanResolveCodeAction); !ok {
+		return nil, nil
+	} else {
+		return s.ResolveCodeAction(ctx, params)
+	}
+}
+
+func (s *Wrapper) ResolveCodeLens(ctx context.Context, params *protocol.CodeLens) (*protocol.CodeLens, error) {
+	s.logger.Info("ResolveCodeLens", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanResolveCodeLens); !ok {
+		return nil, nil
+	} else {
+		return s.ResolveCodeLens(ctx, params)
+	}
+}
+
+func (s *Wrapper) ResolveCompletionItem(ctx context.Context, params *protocol.CompletionItem) (*protocol.CompletionItem, error) {
+	s.logger.Info("ResolveCompletionItem", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanResolveCompletionItem); !ok {
+		return nil, nil
+	} else {
+		return s.ResolveCompletionItem(ctx, params)
+	}
+}
+
+func (s *Wrapper) ResolveDocumentLink(ctx context.Context, params *protocol.DocumentLink) (*protocol.DocumentLink, error) {
+	s.logger.Info("ResolveDocumentLink", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanResolveDocumentLink); !ok {
+		return nil, nil
+	} else {
+		return s.ResolveDocumentLink(ctx, params)
+	}
+}
+
+func (s *Wrapper) ResolveWorkspaceSymbol(ctx context.Context, params *protocol.WorkspaceSymbol) (*protocol.WorkspaceSymbol, error) {
+	s.logger.Info("ResolveWorkspaceSymbol", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanResolveWorkspaceSymbol); !ok {
+		return nil, nil
+	} else {
+		return s.ResolveWorkspaceSymbol(ctx, params)
+	}
+}
+
+func (s *Wrapper) SelectionRange(ctx context.Context, params *protocol.SelectionRangeParams) ([]protocol.SelectionRange, error) {
+	s.logger.Info("SelectionRange", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanSelectionRange); !ok {
+		return nil, nil
+	} else {
+		return s.SelectionRange(ctx, params)
+	}
+}
+
+func (s *Wrapper) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
 	s.logger.Info("SemanticTokensFull", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanSemanticTokensFull); !ok {
 		return nil, nil
@@ -724,7 +911,7 @@ func (s *Wrapper) SemanticTokensFull(ctx context.Context, params *protocol.Seman
 	}
 }
 
-func (s *Wrapper) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (result interface{}, err error) {
+func (s *Wrapper) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (interface{}, error) {
 	s.logger.Info("SemanticTokensFullDelta", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanSemanticTokensFullDelta); !ok {
 		return nil, nil
@@ -733,7 +920,7 @@ func (s *Wrapper) SemanticTokensFullDelta(ctx context.Context, params *protocol.
 	}
 }
 
-func (s *Wrapper) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (result *protocol.SemanticTokens, err error) {
+func (s *Wrapper) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
 	s.logger.Info("SemanticTokensRange", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanSemanticTokensRange); !ok {
 		return nil, nil
@@ -742,16 +929,7 @@ func (s *Wrapper) SemanticTokensRange(ctx context.Context, params *protocol.Sema
 	}
 }
 
-func (s *Wrapper) SemanticTokensRefresh(ctx context.Context) (err error) {
-	s.logger.Info("SemanticTokensRefresh", slog.Any("ctx", ctx))
-	if s, ok := s.handler.(CanSemanticTokensRefresh); !ok {
-		return nil
-	} else {
-		return s.SemanticTokensRefresh(ctx)
-	}
-}
-
-func (s *Wrapper) SetTrace(ctx context.Context, params *protocol.SetTraceParams) (err error) {
+func (s *Wrapper) SetTrace(ctx context.Context, params *protocol.SetTraceParams) error {
 	s.logger.Info("SetTrace", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanSetTrace); !ok {
 		return nil
@@ -760,16 +938,7 @@ func (s *Wrapper) SetTrace(ctx context.Context, params *protocol.SetTraceParams)
 	}
 }
 
-func (s *Wrapper) ShowDocument(ctx context.Context, params *protocol.ShowDocumentParams) (result *protocol.ShowDocumentResult, err error) {
-	s.logger.Info("ShowDocument", slog.Any("ctx", ctx), slog.Any("params", params))
-	if s, ok := s.handler.(CanShowDocument); !ok {
-		return nil, nil
-	} else {
-		return s.ShowDocument(ctx, params)
-	}
-}
-
-func (s *Wrapper) Shutdown(ctx context.Context) (err error) {
+func (s *Wrapper) Shutdown(ctx context.Context) error {
 	s.logger.Info("Shutdown", slog.Any("ctx", ctx))
 	if s, ok := s.handler.(CanShutdown); !ok {
 		return nil
@@ -778,7 +947,7 @@ func (s *Wrapper) Shutdown(ctx context.Context) (err error) {
 	}
 }
 
-func (s *Wrapper) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
+func (s *Wrapper) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
 	s.logger.Info("SignatureHelp", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanSignatureHelp); !ok {
 		return nil, nil
@@ -787,16 +956,43 @@ func (s *Wrapper) SignatureHelp(ctx context.Context, params *protocol.SignatureH
 	}
 }
 
-func (s *Wrapper) Symbols(ctx context.Context, params *protocol.WorkspaceSymbolParams) (result []protocol.SymbolInformation, err error) {
-	s.logger.Info("Symbols", slog.Any("ctx", ctx), slog.Any("params", params))
-	if s, ok := s.handler.(CanSymbols); !ok {
+func (s *Wrapper) Subtypes(ctx context.Context, params *protocol.TypeHierarchySubtypesParams) ([]protocol.TypeHierarchyItem, error) {
+	s.logger.Info("Subtypes", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanSubtypes); !ok {
 		return nil, nil
 	} else {
-		return s.Symbols(ctx, params)
+		return s.Subtypes(ctx, params)
 	}
 }
 
-func (s *Wrapper) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) (result []protocol.Location, err error) {
+func (s *Wrapper) Supertypes(ctx context.Context, params *protocol.TypeHierarchySupertypesParams) ([]protocol.TypeHierarchyItem, error) {
+	s.logger.Info("Supertypes", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanSupertypes); !ok {
+		return nil, nil
+	} else {
+		return s.Supertypes(ctx, params)
+	}
+}
+
+func (s *Wrapper) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error) {
+	s.logger.Info("Symbol", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanSymbol); !ok {
+		return nil, nil
+	} else {
+		return s.Symbol(ctx, params)
+	}
+}
+
+func (s *Wrapper) TextDocumentContent(ctx context.Context, params *protocol.TextDocumentContentParams) (*string, error) {
+	s.logger.Info("TextDocumentContent", slog.Any("ctx", ctx), slog.Any("params", params))
+	if s, ok := s.handler.(CanTextDocumentContent); !ok {
+		return nil, nil
+	} else {
+		return s.TextDocumentContent(ctx, params)
+	}
+}
+
+func (s *Wrapper) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error) {
 	s.logger.Info("TypeDefinition", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanTypeDefinition); !ok {
 		return nil, nil
@@ -805,7 +1001,7 @@ func (s *Wrapper) TypeDefinition(ctx context.Context, params *protocol.TypeDefin
 	}
 }
 
-func (s *Wrapper) WillCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (result *protocol.WorkspaceEdit, err error) {
+func (s *Wrapper) WillCreateFiles(ctx context.Context, params *protocol.CreateFilesParams) (*protocol.WorkspaceEdit, error) {
 	s.logger.Info("WillCreateFiles", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanWillCreateFiles); !ok {
 		return nil, nil
@@ -814,7 +1010,7 @@ func (s *Wrapper) WillCreateFiles(ctx context.Context, params *protocol.CreateFi
 	}
 }
 
-func (s *Wrapper) WillDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (result *protocol.WorkspaceEdit, err error) {
+func (s *Wrapper) WillDeleteFiles(ctx context.Context, params *protocol.DeleteFilesParams) (*protocol.WorkspaceEdit, error) {
 	s.logger.Info("WillDeleteFiles", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanWillDeleteFiles); !ok {
 		return nil, nil
@@ -823,7 +1019,7 @@ func (s *Wrapper) WillDeleteFiles(ctx context.Context, params *protocol.DeleteFi
 	}
 }
 
-func (s *Wrapper) WillRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (result *protocol.WorkspaceEdit, err error) {
+func (s *Wrapper) WillRenameFiles(ctx context.Context, params *protocol.RenameFilesParams) (*protocol.WorkspaceEdit, error) {
 	s.logger.Info("WillRenameFiles", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanWillRenameFiles); !ok {
 		return nil, nil
@@ -832,7 +1028,7 @@ func (s *Wrapper) WillRenameFiles(ctx context.Context, params *protocol.RenameFi
 	}
 }
 
-func (s *Wrapper) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (err error) {
+func (s *Wrapper) WillSave(ctx context.Context, params *protocol.WillSaveTextDocumentParams) error {
 	s.logger.Info("WillSave", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanWillSave); !ok {
 		return nil
@@ -841,7 +1037,7 @@ func (s *Wrapper) WillSave(ctx context.Context, params *protocol.WillSaveTextDoc
 	}
 }
 
-func (s *Wrapper) WillSaveWaitUntil(ctx context.Context, params *protocol.WillSaveTextDocumentParams) (result []protocol.TextEdit, err error) {
+func (s *Wrapper) WillSaveWaitUntil(ctx context.Context, params *protocol.WillSaveTextDocumentParams) ([]protocol.TextEdit, error) {
 	s.logger.Info("WillSaveWaitUntil", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanWillSaveWaitUntil); !ok {
 		return nil, nil
@@ -850,7 +1046,7 @@ func (s *Wrapper) WillSaveWaitUntil(ctx context.Context, params *protocol.WillSa
 	}
 }
 
-func (s *Wrapper) WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) (err error) {
+func (s *Wrapper) WorkDoneProgressCancel(ctx context.Context, params *protocol.WorkDoneProgressCancelParams) error {
 	s.logger.Info("WorkDoneProgressCancel", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanWorkDoneProgressCancel); !ok {
 		return nil
@@ -858,4 +1054,3 @@ func (s *Wrapper) WorkDoneProgressCancel(ctx context.Context, params *protocol.W
 		return s.WorkDoneProgressCancel(ctx, params)
 	}
 }
-
