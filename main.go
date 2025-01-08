@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log"
 	"log/slog"
@@ -40,18 +39,6 @@ func (r *readWriteCloser) Dial(ctx context.Context) (io.ReadWriteCloser, error) 
 	}{io.NopCloser(r.readCloser), r.writeCloser}, nil
 }
 
-func (r *readWriteCloser) Read(b []byte) (int, error) {
-	return r.readCloser.Read(b)
-}
-
-func (r *readWriteCloser) Write(b []byte) (int, error) {
-	return r.writeCloser.Write(b)
-}
-
-func (r *readWriteCloser) Close() error {
-	return errors.Join(r.readCloser.Close(), r.writeCloser.Close())
-}
-
 type Server struct {
 	// conn             *jsonrpc2.Connection
 	logFile          *os.File
@@ -83,7 +70,6 @@ func New(ctx context.Context) (*Server, func() error) {
 		Preempter: server,
 		Handler:   protocol.ServerHandler(server.handler, nil),
 	})
-
 	if err != nil {
 		return nil, func() error { return err }
 	}
@@ -91,11 +77,6 @@ func New(ctx context.Context) (*Server, func() error) {
 	// workaround
 	rawHandler.SetClient(protocol.ClientDispatcher(conn))
 
-	/*
-		for _, opt := range opts {
-			opt(server)
-		}
-	*/
 	return server, func() error {
 		return conn.Wait()
 	}
