@@ -6,7 +6,7 @@ toolchain go1.23.2
 
 require (
 	github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc
-	github.com/cloudspannerecosystem/memefish v0.1.1-0.20250101040308-480c4e80d41c
+	github.com/cloudspannerecosystem/memefish v0.2.1-0.20250107075614-e6930980bf05
 	github.com/samber/lo v1.47.0
 	go.lsp.dev/jsonrpc2 v0.10.0
 	go.lsp.dev/pkg v0.0.0-20210717090340-384b27a52fb2

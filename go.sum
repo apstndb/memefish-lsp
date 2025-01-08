@@ -2,10 +2,13 @@ github.com/MakeNowJust/heredoc/v2 v2.0.1 h1:rlCHh70XXXv7toz95ajQWOWQnN4WNLt0TdpZ
 github.com/MakeNowJust/heredoc/v2 v2.0.1/go.mod h1:6/2Abh5s+hc3g9nbWLe9ObDIOhaRrqsyY9MWy+4JdRM=
 github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc h1:djtqIk9U2GWAbL2WgpBM/RffNyilUar+War1YWjqI4U=
 github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc/go.mod h1:T2x/xf7GA3AOfm8245sTteb27qYAgbXIMlysbxJzpXk=
+github.com/apstndb/memefish v0.0.0-20250105144010-cf3ec6c7ced4 h1:+TN1KEmgL0pqbR/8031E2qG6lVc5KdxTuU5jHDEOeE0=
+github.com/apstndb/memefish v0.0.0-20250105144010-cf3ec6c7ced4/go.mod h1:rrHSb7mQfV8Xl47cvnE1dYJ8+zpvog49Yma0j4YCDnc=
 github.com/benbjohnson/clock v1.1.0 h1:Q92kusRqC1XV2MjkWETPvjJVqKetz1OzxZB7mHJLju8=
 github.com/benbjohnson/clock v1.1.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
-github.com/cloudspannerecosystem/memefish v0.1.1-0.20250101040308-480c4e80d41c h1:2cxZi72y5wy/Vvmptc88ReFGgv0kDK8E4GcxdrzSS/g=
 github.com/cloudspannerecosystem/memefish v0.1.1-0.20250101040308-480c4e80d41c/go.mod h1:rrHSb7mQfV8Xl47cvnE1dYJ8+zpvog49Yma0j4YCDnc=
+github.com/cloudspannerecosystem/memefish v0.2.1-0.20250107075614-e6930980bf05 h1:p2Z1TBIkvZ+8aCPyqnf3QnxCaWCu8vGVVGIjKGb9U0w=
+github.com/cloudspannerecosystem/memefish v0.2.1-0.20250107075614-e6930980bf05/go.mod h1:rrHSb7mQfV8Xl47cvnE1dYJ8+zpvog49Yma0j4YCDnc=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
