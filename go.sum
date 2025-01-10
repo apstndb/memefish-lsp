@@ -4,8 +4,8 @@ github.com/apstndb/go-lsp-export v0.0.0-20250108105656-59a3e5076bce h1:4PQWg54T+
 github.com/apstndb/go-lsp-export v0.0.0-20250108105656-59a3e5076bce/go.mod h1:yIUuEz6UcSkf6N27n++0QPyz978iVxpodX9SS9Mhjbg=
 github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc h1:djtqIk9U2GWAbL2WgpBM/RffNyilUar+War1YWjqI4U=
 github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc/go.mod h1:T2x/xf7GA3AOfm8245sTteb27qYAgbXIMlysbxJzpXk=
-github.com/apstndb/memefish v0.0.0-20250108113653-810cde867e02 h1:azC4RS1VfTp7XXO5JG6Rdc9DOH+mZZ77X+qFf4nZGik=
-github.com/apstndb/memefish v0.0.0-20250108113653-810cde867e02/go.mod h1:rrHSb7mQfV8Xl47cvnE1dYJ8+zpvog49Yma0j4YCDnc=
+github.com/apstndb/memefish v0.0.0-20250109153136-8d56cd72718d h1:2DHvcAEs/dc4vVaY7dqYImsfmFpIU/jyOuid4HRRpko=
+github.com/apstndb/memefish v0.0.0-20250109153136-8d56cd72718d/go.mod h1:rrHSb7mQfV8Xl47cvnE1dYJ8+zpvog49Yma0j4YCDnc=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/k0kubun/pp v1.3.1-0.20200204103551-99835366d1cc h1:XLjmW07gT7cG/wb6mavIrvAIWBYaTacPo8UOnxGSspA=

@@ -21,4 +21,4 @@ require (
 	spheric.cloud/xiter v0.0.0-20240904151420-c999f37a46b2 // indirect
 )
 
-replace github.com/cloudspannerecosystem/memefish => github.com/apstndb/memefish v0.0.0-20250108113653-810cde867e02
+replace github.com/cloudspannerecosystem/memefish => github.com/apstndb/memefish v0.0.0-20250109153136-8d56cd72718d
