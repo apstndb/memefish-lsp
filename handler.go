@@ -1,12 +1,15 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -89,6 +92,51 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 			return false
 		}
 		switch n := node.(type) {
+		case *ast.Select:
+			names, ok := extractColumnName(n)
+			if !ok {
+				return true
+			}
+
+			if n.GroupBy != nil {
+				for _, expr := range n.GroupBy.Exprs {
+					if lit, ok := expr.(*ast.IntLiteral); ok {
+						parsed, err := strconv.ParseInt(lit.Value, lit.Base, 64)
+						if err != nil {
+							// TODO: diag
+							continue
+						}
+
+						if int(parsed) > len(names) {
+							continue
+						}
+						name := cmp.Or(names[parsed-1], n.Results[parsed-1].SQL())
+						result = append(result, newInlayHint(lex, protocol.Parameter, expr.End(), "/* "+name+" */"))
+					}
+				}
+			}
+		case *ast.Query:
+			names, ok := extractColumnName(n.Query)
+			if !ok {
+				return true
+			}
+
+			if n.OrderBy != nil {
+				for _, expr := range n.OrderBy.Items {
+					if n, ok := expr.Expr.(*ast.IntLiteral); ok {
+						parsed, err := strconv.ParseInt(n.Value, n.Base, 64)
+						if err != nil {
+							// TODO: diag
+							continue
+						}
+
+						if int(parsed) > len(names) {
+							continue
+						}
+						result = append(result, newInlayHint(lex, protocol.Parameter, expr.Expr.End(), "/* "+names[parsed-1]+" */"))
+					}
+				}
+			}
 		case *ast.AsAlias:
 			if n.As.Invalid() {
 				position := positionByPos(lex, n.Alias.Pos())
@@ -108,21 +156,45 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 				}
 				result = append(result, hint)
 			}
+		case *ast.TupleStructLiteral:
+			result = append(result, newInlayHint(lex, protocol.Parameter, n.Pos(), "STRUCT"))
 		case *ast.ArrayLiteral:
+			var fieldNames []string
 			st, ok := n.Type.(*ast.StructType)
-			if !ok {
-				return true
+			if ok {
+				fieldNames = lo.Map(st.Fields, func(item *ast.StructField, index int) string {
+					return lo.FromPtr(item.Ident).Name
+				})
+			}
+			if len(n.Values) > 0 {
+				switch expr := n.Values[0].(type) {
+				case *ast.TypedStructLiteral:
+					fieldNames = lo.Map(expr.Fields, func(item *ast.StructField, index int) string {
+						return lo.FromPtr(item.Ident).Name
+					})
+				case *ast.TypelessStructLiteral:
+					fieldNames = lo.Map(expr.Values, func(item ast.TypelessStructLiteralArg, index int) string {
+						switch e := item.(type) {
+						case *ast.Alias:
+							return e.As.Alias.Name
+						case *ast.ExprArg:
+							return ""
+						default:
+							return ""
+						}
+					})
+				}
 			}
 			for _, value := range n.Values {
 				tsl, ok := value.(*ast.TupleStructLiteral)
 				if !ok {
 					continue
 				}
-				for _, z := range lo.Zip2(st.Fields, tsl.Values) {
-					if z.B == nil || z.A == nil || z.A.Ident == nil {
+				for _, z := range lo.Zip2(fieldNames, tsl.Values) {
+					if z.B == nil || z.A == "" {
 						continue
 					}
-					result = append(result, newInlayHint(lex, protocol.Parameter, z.B.Pos(), lo.FromPtr(z.A.Ident).Name))
+					result = append(result, newInlayHint(lex, protocol.Parameter, z.B.End(), "AS "+z.A))
 				}
 
 			}
@@ -182,7 +254,17 @@ func generateInlayHintForSelectItems(lex *memefish.Lexer, query ast.QueryExpr, c
 
 			switch item := item.(type) {
 			case *ast.ExprSelectItem:
-				result = append(result, newInlayHint(lex, protocol.Parameter, item.Pos(), columnNames[i]))
+				switch e := item.Expr.(type) {
+				case *ast.Ident:
+					if e.Name == columnNames[i] {
+						continue
+					}
+				case *ast.Path:
+					if lo.FromPtr(lo.LastOrEmpty(e.Idents)).Name == columnNames[i] {
+						continue
+					}
+				}
+				result = append(result, newInlayHint(lex, protocol.Parameter, item.End(), "AS "+columnNames[i]))
 			case *ast.Alias:
 				// TODO
 			}
@@ -412,8 +494,8 @@ func kindToSemanticTokenTypes(kind token.TokenKind) protocol.SemanticTokenTypes 
 	switch kind {
 	case token.TokenParam:
 		return protocol.ParameterType
-	case token.TokenIdent:
-		return protocol.VariableType
+	//case token.TokenIdent:
+	// 	return protocol.VariableType
 	case token.TokenInt, token.TokenFloat:
 		return protocol.NumberType
 	case token.TokenString, token.TokenBytes:
@@ -427,21 +509,52 @@ func kindToSemanticTokenTypes(kind token.TokenKind) protocol.SemanticTokenTypes 
 	return protocol.SemanticTokenTypes("")
 }
 
+type semanticToken struct {
+	Line, Col, Length int
+
+	TokenType      protocol.SemanticTokenTypes
+	TokenModifiers []protocol.SemanticTokenModifiers
+}
+
+func newSemanticTokenByNode(lex *memefish.Lexer, node ast.Node, tokenType protocol.SemanticTokenTypes, tokenModifiers ...protocol.SemanticTokenModifiers) semanticToken {
+	return newSemanticToken(lex, node.Pos(), node.End(), tokenType, tokenModifiers...)
+}
+
+func newSemanticToken(lex *memefish.Lexer, pos, end token.Pos, tokenType protocol.SemanticTokenTypes, tokenModifiers ...protocol.SemanticTokenModifiers) semanticToken {
+	position := lex.Position(pos, end)
+	return semanticToken{
+		Line:           position.Line,
+		Col:            position.Column,
+		Length:         int(end - pos),
+		TokenType:      tokenType,
+		TokenModifiers: tokenModifiers,
+	}
+}
+
 func (h *Handler) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (result *protocol.SemanticTokens, err error) {
 	var data []uint32
 	filepath := params.TextDocument.URI.Path()
 	s := string(h.fileToContentMap[params.TextDocument.URI.Path()])
 
-	type semanticToken struct {
-		Line, Col, Length int
-
-		TokenType      protocol.SemanticTokenTypes
-		TokenModifiers []protocol.SemanticTokenModifiers
-	}
-
 	var tokens []semanticToken
 
 	lex := newLexer(filepath, s)
+
+	parsed := h.parsedMap[params.TextDocument.URI.Path()]
+	memewalk.InspectSlice(parsed, func(path []string, node ast.Node) bool {
+		if node == nil {
+			return false
+		}
+		switch n := node.(type) {
+		case *ast.NamedType, *ast.ScalarSchemaType, *ast.SimpleType, *ast.ArrayType, *ast.StructType, *ast.ArraySchemaType, *ast.SizedSchemaType:
+			tokens = append(tokens, newSemanticTokenByNode(lex, n, protocol.TypeType))
+		case *ast.CreateTable:
+			tokens = append(tokens, newSemanticTokenByNode(lex, n.Name, protocol.NamespaceType, protocol.ModDefinition))
+		case *ast.CallExpr:
+			tokens = append(tokens, newSemanticTokenByNode(lex, n.Func, protocol.FunctionType))
+		}
+		return true
+	})
 loop:
 	for {
 		hasError := false
@@ -453,8 +566,7 @@ loop:
 		tok := lex.Token
 
 		for _, comment := range tok.Comments {
-			pos := lex.Position(comment.Pos, comment.End)
-			tokens = append(tokens, semanticToken{pos.Line, pos.Column, len(comment.Raw), protocol.CommentType, nil})
+			tokens = append(tokens, newSemanticToken(lex, comment.Pos, comment.End, protocol.CommentType))
 		}
 
 		if tok.Kind == token.TokenEOF {
@@ -466,14 +578,17 @@ loop:
 			continue
 		}
 
-		pos := lex.Position(tok.Pos, tok.End)
-		tokens = append(tokens, semanticToken{pos.Line, pos.Column, len(tok.Raw), semTokType, nil})
+		tokens = append(tokens, newSemanticToken(lex, tok.Pos, tok.End, semTokType))
 
 		if hasError {
 			break
 		}
 
 	}
+
+	slices.SortFunc(tokens, func(a, b semanticToken) int {
+		return cmp.Or(cmp.Compare(a.Line, b.Line), cmp.Compare(a.Col, b.Col))
+	})
 
 	var line, column int
 	for _, token := range tokens {
