@@ -89,6 +89,25 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 			return false
 		}
 		switch n := node.(type) {
+		case *ast.ArrayLiteral:
+			st, ok := n.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			for _, value := range n.Values {
+				tsl, ok := value.(*ast.TupleStructLiteral)
+				if !ok {
+					continue
+				}
+				for _, z := range lo.Zip2(st.Fields, tsl.Values) {
+					if z.B == nil || z.A == nil || z.A.Ident == nil {
+						continue
+					}
+					result = append(result, newInlayHint(lex, protocol.Parameter, z.B.Pos(), lo.FromPtr(z.A.Ident).Name))
+				}
+
+			}
+		case *ast.TypedStructLiteral:
 		case *ast.CompoundQuery:
 			names, ok := extractColumnName(n.Queries[0])
 			if !ok {
@@ -96,7 +115,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 			}
 
 			for _, query := range n.Queries[1:] {
-				result = append(result, generateInlayHint(lex, query, names)...)
+				result = append(result, generateInlayHintForSelectItems(lex, query, names)...)
 			}
 		case *ast.Insert:
 			columns := lo.Map(n.Columns, func(item *ast.Ident, index int) string {
@@ -105,7 +124,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 
 			switch input := n.Input.(type) {
 			case *ast.SubQueryInput:
-				result = append(result, generateInlayHint(lex, input.Query, columns)...)
+				result = append(result, generateInlayHintForSelectItems(lex, input.Query, columns)...)
 			case *ast.ValuesInput:
 				for _, valuesRow := range input.Rows {
 					for i, expr := range valuesRow.Exprs {
@@ -123,7 +142,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 	return result, nil
 }
 
-func generateInlayHint(lex *memefish.Lexer, query ast.QueryExpr, columnNames []string) []protocol.InlayHint {
+func generateInlayHintForSelectItems(lex *memefish.Lexer, query ast.QueryExpr, columnNames []string) []protocol.InlayHint {
 	var result []protocol.InlayHint
 	if sq, ok := query.(*ast.SubQuery); ok {
 		query = sq.Query
@@ -141,7 +160,13 @@ func generateInlayHint(lex *memefish.Lexer, query ast.QueryExpr, columnNames []s
 			if i > len(columnNames) {
 				continue
 			}
-			result = append(result, newInlayHint(lex, protocol.Parameter, item.Pos(), columnNames[i]))
+
+			switch item := item.(type) {
+			case *ast.ExprSelectItem:
+				result = append(result, newInlayHint(lex, protocol.Parameter, item.Pos(), columnNames[i]))
+			case *ast.Alias:
+				// TODO
+			}
 		}
 	}
 	return result
