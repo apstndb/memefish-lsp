@@ -89,6 +89,25 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 			return false
 		}
 		switch n := node.(type) {
+		case *ast.AsAlias:
+			if n.As.Invalid() {
+				position := positionByPos(lex, n.Alias.Pos())
+				hint := protocol.InlayHint{
+					Position: position,
+					Label: []protocol.InlayHintLabelPart{{
+						Value: "AS",
+					}},
+					Kind: protocol.InlayHintKind(0),
+					TextEdits: []protocol.TextEdit{{
+						Range: protocol.Range{
+							Start: positionByPos(lex, n.Alias.Pos()),
+							End:   positionByPos(lex, n.Alias.Pos()),
+						},
+						NewText: "AS ",
+					}},
+				}
+				result = append(result, hint)
+			}
 		case *ast.ArrayLiteral:
 			st, ok := n.Type.(*ast.StructType)
 			if !ok {
