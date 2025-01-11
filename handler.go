@@ -17,6 +17,7 @@ import (
 	"github.com/cloudspannerecosystem/memefish/ast"
 	"github.com/cloudspannerecosystem/memefish/token"
 	"github.com/samber/lo"
+	"spheric.cloud/xiter"
 
 	"github.com/apstndb/go-lsp-export/protocol"
 
@@ -33,6 +34,7 @@ var _ interface {
 	lspabst.CanSemanticTokensFull
 	lspabst.CanHover
 	lspabst.TextDocumentSyncCapability
+	lspabst.CanDocumentSymbol
 } = (*Handler)(nil)
 
 type Handler struct {
@@ -47,6 +49,52 @@ type Handler struct {
 	supportedDefinitionLinkClient bool
 	// tokenTypeToIndex              map[string]int
 	afterShutdown bool
+}
+
+func fullname(idents []*ast.Ident) string {
+	return xiter.Join(xiter.Map(slices.Values(idents), func(in *ast.Ident) string {
+		return in.Name
+	}), ".")
+}
+
+func rangeByNode(lex *memefish.Lexer, node ast.Node) protocol.Range {
+	return protocol.Range{
+		Start: positionByPos(lex, node.Pos()),
+		End:   positionByPos(lex, node.End()),
+	}
+}
+
+func (h *Handler) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]interface{}, error) {
+	// Note: this function is NOP because it requires extra configurations for LSP4IJ
+	// https://github.com/redhat-developer/lsp4ij/blob/main/docs/LSPSupport.md#document-symbol
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	var result []any
+	parsed := h.parsedMap[params.TextDocument.URI.Path()]
+	lex := newLexer(params.TextDocument.URI.Path(), string(h.fileToContentMap[params.TextDocument.URI.Path()]))
+
+	memewalk.InspectSlice(parsed, func(path []string, node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.CreateTable:
+			var children []protocol.DocumentSymbol
+			for _, column := range n.Columns {
+				children = append(children, protocol.DocumentSymbol{
+					Name:  column.Name.Name,
+					Kind:  protocol.Field,
+					Range: rangeByNode(lex, column),
+				})
+			}
+			result = append(result, protocol.DocumentSymbol{
+				Name:     fullname(n.Name.Idents),
+				Kind:     protocol.Struct,
+				Range:    rangeByNode(lex, node),
+				Children: children,
+			})
+		}
+		return true
+	})
+	return result, nil
 }
 
 func extractColumnName(query ast.QueryExpr) ([]string, bool) {
@@ -758,6 +806,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_hoverProvider{Value: true}, nil),
 			InlayHintProvider: lo.Ternary(AssertInterface[lspabst.CanInlayHint](h),
 				&protocol.Or_ServerCapabilities_inlayHintProvider{Value: true}, nil),
+			DocumentSymbolProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentSymbol](h),
+				&protocol.Or_ServerCapabilities_documentSymbolProvider{Value: true}, nil),
 			// DefinitionProvider: true,
 			// CompletionProvider: &protocol.CompletionOptions{},
 		}}, nil
