@@ -1,7 +1,9 @@
 github.com/MakeNowJust/heredoc/v2 v2.0.1 h1:rlCHh70XXXv7toz95ajQWOWQnN4WNLt0TdpZYIR/J6A=
 github.com/MakeNowJust/heredoc/v2 v2.0.1/go.mod h1:6/2Abh5s+hc3g9nbWLe9ObDIOhaRrqsyY9MWy+4JdRM=
-github.com/apstndb/go-lsp-export v0.0.0-20250108105656-59a3e5076bce h1:4PQWg54T+3M6w2nBgA2EjEv/HmKSmXvfvNYCJu91QtU=
-github.com/apstndb/go-lsp-export v0.0.0-20250108105656-59a3e5076bce/go.mod h1:yIUuEz6UcSkf6N27n++0QPyz978iVxpodX9SS9Mhjbg=
+github.com/apstndb/go-lsp-export v0.0.0-20250111110713-da502b65ef68 h1:nvuOEAE6ktXnyuqw9NxQ2MnMgP8uo9PAAH2GuI0VAkE=
+github.com/apstndb/go-lsp-export v0.0.0-20250111110713-da502b65ef68/go.mod h1:KZHeSRVF2J83Dw88SpQfX9e7ZgBQ8uC3K+ys8d3shN0=
+github.com/apstndb/gotoolsdiff v0.29.0 h1:PwCCgt5/sjc9Ys5EGaoMtv9i1K1Q1dbmv0tTAEFQc78=
+github.com/apstndb/gotoolsdiff v0.29.0/go.mod h1:w/0yu9ZF6Gdwo/IlCjUvBthYFXnNE8k0r2q/hNp4iJg=
 github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc h1:djtqIk9U2GWAbL2WgpBM/RffNyilUar+War1YWjqI4U=
 github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc/go.mod h1:T2x/xf7GA3AOfm8245sTteb27qYAgbXIMlysbxJzpXk=
 github.com/apstndb/memefish v0.0.0-20250109153136-8d56cd72718d h1:2DHvcAEs/dc4vVaY7dqYImsfmFpIU/jyOuid4HRRpko=
