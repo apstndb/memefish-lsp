@@ -4,10 +4,10 @@ github.com/apstndb/go-lsp-export v0.0.0-20250111110713-da502b65ef68 h1:nvuOEAE6k
 github.com/apstndb/go-lsp-export v0.0.0-20250111110713-da502b65ef68/go.mod h1:KZHeSRVF2J83Dw88SpQfX9e7ZgBQ8uC3K+ys8d3shN0=
 github.com/apstndb/gotoolsdiff v0.29.0 h1:PwCCgt5/sjc9Ys5EGaoMtv9i1K1Q1dbmv0tTAEFQc78=
 github.com/apstndb/gotoolsdiff v0.29.0/go.mod h1:w/0yu9ZF6Gdwo/IlCjUvBthYFXnNE8k0r2q/hNp4iJg=
-github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc h1:djtqIk9U2GWAbL2WgpBM/RffNyilUar+War1YWjqI4U=
-github.com/apstndb/gsqlutils v0.0.0-20241220021154-62754cd04acc/go.mod h1:T2x/xf7GA3AOfm8245sTteb27qYAgbXIMlysbxJzpXk=
-github.com/apstndb/memefish v0.0.0-20250109153136-8d56cd72718d h1:2DHvcAEs/dc4vVaY7dqYImsfmFpIU/jyOuid4HRRpko=
-github.com/apstndb/memefish v0.0.0-20250109153136-8d56cd72718d/go.mod h1:rrHSb7mQfV8Xl47cvnE1dYJ8+zpvog49Yma0j4YCDnc=
+github.com/apstndb/gsqlutils v0.0.0-20241220013846-029fcafe0aa1 h1:xZHO1Zzr1b6JDCNutN6aSQcL2lrjIpBE9Dw5MrPUFcg=
+github.com/apstndb/gsqlutils v0.0.0-20241220013846-029fcafe0aa1/go.mod h1:T2x/xf7GA3AOfm8245sTteb27qYAgbXIMlysbxJzpXk=
+github.com/cloudspannerecosystem/memefish v0.5.0 h1:4L1K1pTqzHyhu5R7dHpOmVVjYKWeivmRBJRQgJdMY7I=
+github.com/cloudspannerecosystem/memefish v0.5.0/go.mod h1:LB19E2xVWA3vns8r01ESIZB67/OYZOHVuETzifgTzVc=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/k0kubun/pp v1.3.1-0.20200204103551-99835366d1cc h1:XLjmW07gT7cG/wb6mavIrvAIWBYaTacPo8UOnxGSspA=
