@@ -7,7 +7,7 @@ toolchain go1.23.2
 require (
 	github.com/apstndb/go-lsp-export v0.0.0-20250111110713-da502b65ef68
 	github.com/apstndb/gsqlutils v0.0.0-20241220013846-029fcafe0aa1
-	github.com/cloudspannerecosystem/memefish v0.5.0
+	github.com/cloudspannerecosystem/memefish v0.6.2
 	github.com/samber/lo v1.47.0
 	golang.org/x/exp/jsonrpc2 v0.0.0-20250106191152-7588d65b2ba8
 	spheric.cloud/xiter v0.0.0-20240904151420-c999f37a46b2
