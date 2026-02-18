@@ -8,8 +8,11 @@ github.com/apstndb/gsqlutils v0.0.0-20241220013846-029fcafe0aa1 h1:xZHO1Zzr1b6JD
 github.com/apstndb/gsqlutils v0.0.0-20241220013846-029fcafe0aa1/go.mod h1:T2x/xf7GA3AOfm8245sTteb27qYAgbXIMlysbxJzpXk=
 github.com/cloudspannerecosystem/memefish v0.5.0 h1:4L1K1pTqzHyhu5R7dHpOmVVjYKWeivmRBJRQgJdMY7I=
 github.com/cloudspannerecosystem/memefish v0.5.0/go.mod h1:LB19E2xVWA3vns8r01ESIZB67/OYZOHVuETzifgTzVc=
+github.com/cloudspannerecosystem/memefish v0.6.2 h1:0R6C8KdJLLbL3aYk/rzWrwvE+bPRMqj/2MNlNvAzIPo=
+github.com/cloudspannerecosystem/memefish v0.6.2/go.mod h1:mVw0xBxy0yOgm990BuR0+nqP8J+yBAAf7N/2uL69rBU=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
+github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/k0kubun/pp v1.3.1-0.20200204103551-99835366d1cc h1:XLjmW07gT7cG/wb6mavIrvAIWBYaTacPo8UOnxGSspA=
 github.com/k0kubun/pp/v3 v3.4.1 h1:1WdFZDRRqe8UsR61N/2RoOZ3ziTEqgTPVqKrHeb779Y=
 github.com/k0kubun/pp/v3 v3.4.1/go.mod h1:+SiNiqKnBfw1Nkj82Lh5bIeKQOAkPy6Xw9CAZUZ8npI=
