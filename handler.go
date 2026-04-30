@@ -47,8 +47,48 @@ type Handler struct {
 	tokenTypeMap                  map[protocol.SemanticTokenTypes]uint32
 	tokenModifierMap              map[protocol.SemanticTokenModifiers]uint32
 	supportedDefinitionLinkClient bool
-	// tokenTypeToIndex              map[string]int
-	afterShutdown bool
+	afterShutdown                 bool
+}
+
+func (h *Handler) SelectionRange(ctx context.Context, params *protocol.SelectionRangeParams) ([]protocol.SelectionRange, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	parsed := h.parsedMap[params.TextDocument.URI.Path()]
+	lex := newLexer(params.TextDocument.URI.Path(), string(h.fileToContentMap[params.TextDocument.URI.Path()]))
+	var result []protocol.SelectionRange
+
+	path := findNodesByPos(h.logger, lex, parsed, params.Positions[0])
+	var parent *protocol.SelectionRange
+	for i, elem := range path {
+		if i == 0 {
+			parent = &protocol.SelectionRange{
+				Range: rangeByNode(lex, elem.Node),
+			}
+		}
+
+		var selectionRange *protocol.SelectionRange
+		switch n := elem.Node.(type) {
+		case *ast.CTE:
+			selectionRange = &protocol.SelectionRange{
+				Range:  rangeByNode(lex, n.QueryExpr),
+				Parent: parent,
+			}
+		case *ast.SubQuery, *ast.SubQueryTableExpr:
+			selectionRange = &protocol.SelectionRange{
+				Range:  rangeByNode(lex, n),
+				Parent: parent,
+			}
+		default:
+			continue
+		}
+
+		parent = selectionRange
+	}
+
+	result = append(result, *parent)
+
+	return result, nil
 }
 
 func fullname(idents []*ast.Ident) string {
@@ -268,7 +308,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 				for _, valuesRow := range input.Rows {
 					for i, expr := range valuesRow.Exprs {
 						// TODO: warn mismatch
-						if i > len(n.Columns) {
+						if i >= len(n.Columns) {
 							continue
 						}
 						result = append(result, newInlayHint(lex, protocol.Parameter, expr.Pos(), n.Columns[i].Name))
@@ -362,10 +402,10 @@ func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureH
 				Label:           "",
 				Documentation:   nil,
 				Parameters:      nil,
-				ActiveParameter: 0,
+				ActiveParameter: lo.ToPtr(uint32(0)),
 			},
 		},
-		ActiveParameter: 0,
+		ActiveParameter: lo.ToPtr(uint32(0)),
 		ActiveSignature: 0,
 	}, nil
 }
@@ -464,10 +504,10 @@ func include(nodePos *token.Position, lspPos protocol.Position) bool {
 
 func toFoldingRange(position *token.Position, kind protocol.FoldingRangeKind) protocol.FoldingRange {
 	return protocol.FoldingRange{
-		StartLine:      uint32(position.Line),
-		StartCharacter: uint32(position.Column),
-		EndLine:        uint32(position.EndLine),
-		EndCharacter:   uint32(position.EndColumn),
+		StartLine:      lo.ToPtr(uint32(position.Line)),
+		StartCharacter: lo.ToPtr(uint32(position.Column)),
+		EndLine:        lo.ToPtr(uint32(position.EndLine)),
+		EndCharacter:   lo.ToPtr(uint32(position.EndColumn)),
 		Kind:           string(kind),
 	}
 }
@@ -790,7 +830,10 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 	h.logger.Info("Initialize", slog.Any("params", params), slog.Any("tokenTypeMap", h.tokenTypeMap))
 
 	return &protocol.InitializeResult{
-		ServerInfo: &protocol.ServerInfo{},
+		ServerInfo: &protocol.ServerInfo{
+			Name:    "memefish-lsp",
+			Version: "v0.0.0-devel",
+		},
 		Capabilities: protocol.ServerCapabilities{
 			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h), protocol.Full, protocol.None),
 			SemanticTokensProvider: map[string]any{
@@ -808,6 +851,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_inlayHintProvider{Value: true}, nil),
 			DocumentSymbolProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentSymbol](h),
 				&protocol.Or_ServerCapabilities_documentSymbolProvider{Value: true}, nil),
+			SelectionRangeProvider: lo.Ternary(AssertInterface[lspabst.CanSelectionRange](h),
+				&protocol.Or_ServerCapabilities_selectionRangeProvider{Value: true}, nil),
 			// DefinitionProvider: true,
 			// CompletionProvider: &protocol.CompletionOptions{},
 		}}, nil

@@ -356,7 +356,7 @@ type CanSymbol interface {
 }
 
 type CanTextDocumentContent interface {
-	TextDocumentContent(ctx context.Context, params *protocol.TextDocumentContentParams) (*string, error)
+	TextDocumentContent(ctx context.Context, params *protocol.TextDocumentContentParams) (*protocol.TextDocumentContentResult, error)
 }
 
 type CanTypeDefinition interface {
@@ -983,7 +983,7 @@ func (s *Wrapper) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolPa
 	}
 }
 
-func (s *Wrapper) TextDocumentContent(ctx context.Context, params *protocol.TextDocumentContentParams) (*string, error) {
+func (s *Wrapper) TextDocumentContent(ctx context.Context, params *protocol.TextDocumentContentParams) (*protocol.TextDocumentContentResult, error) {
 	s.logger.Info("TextDocumentContent", slog.Any("ctx", ctx), slog.Any("params", params))
 	if s, ok := s.handler.(CanTextDocumentContent); !ok {
 		return nil, nil
