@@ -42,7 +42,15 @@ var _ interface {
 	lspabst.CanDeclaration
 	lspabst.CanDefinition
 	lspabst.CanDiagnostic
+	lspabst.CanDiagnosticWorkspace
+	lspabst.CanDidChange
+	lspabst.CanDidChangeWatchedFiles
+	lspabst.CanDidChangeWorkspaceFolders
+	lspabst.CanDidCreateFiles
+	lspabst.CanDidDeleteFiles
+	lspabst.CanDidRenameFiles
 	lspabst.CanDocumentHighlight
+	lspabst.CanExit
 	lspabst.CanImplementation
 	lspabst.CanPrepareRename
 	lspabst.CanRangeFormatting
@@ -54,6 +62,7 @@ var _ interface {
 	lspabst.CanSemanticTokensFullDelta
 	lspabst.CanSemanticTokensRange
 	lspabst.CanSignatureHelp
+	lspabst.CanShutdown
 	lspabst.CanHover
 	lspabst.CanInlayHint
 	lspabst.CanLinkedEditingRange
