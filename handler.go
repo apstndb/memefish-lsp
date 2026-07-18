@@ -52,6 +52,7 @@ var _ interface {
 	lspabst.CanSignatureHelp
 	lspabst.CanHover
 	lspabst.CanInlayHint
+	lspabst.CanLinkedEditingRange
 	lspabst.CanOnTypeFormatting
 	lspabst.TextDocumentSyncCapability
 	lspabst.CanDocumentSymbol
@@ -1160,6 +1161,26 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 	}, nil
 }
 
+func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (*protocol.LinkedEditingRanges, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	lex := newLexer(path, string(h.fileToContentMap[path]))
+	symbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position)
+	if !ok {
+		return nil, nil
+	}
+	ranges := simpleTableLinkedRanges(lex, h.parsedMap[path], symbol.Name)
+	if len(ranges) < 2 {
+		return nil, nil
+	}
+	return &protocol.LinkedEditingRanges{
+		Ranges:      ranges,
+		WordPattern: "[A-Za-z_][A-Za-z0-9_]*",
+	}, nil
+}
+
 type tableSymbol struct {
 	Name  string
 	Range protocol.Range
@@ -1216,6 +1237,28 @@ func simpleTableRenameEdits(lex *memefish.Lexer, stmts []ast.Statement, oldName,
 		return true
 	})
 	return edits
+}
+
+func simpleTableLinkedRanges(lex *memefish.Lexer, stmts []ast.Statement, name string) []protocol.Range {
+	result := []protocol.Range{}
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.CreateTable:
+			if isSimplePath(n.Name) && pathName(n.Name) == name {
+				result = append(result, rangeByNode(lex, n.Name))
+			}
+		case *ast.PathTableExpr:
+			if isSimplePath(n.Path) && pathName(n.Path) == name {
+				result = append(result, rangeByNode(lex, n.Path))
+			}
+		case *ast.TableName:
+			if identName(n.Table) == name {
+				result = append(result, rangeByNode(lex, n.Table))
+			}
+		}
+		return true
+	})
+	return result
 }
 
 func isSimplePath(path *ast.Path) bool {
@@ -1907,6 +1950,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_referencesProvider{Value: true}, nil),
 			RenameProvider: lo.Ternary(AssertInterface[lspabst.CanRename](h),
 				&protocol.RenameOptions{PrepareProvider: AssertInterface[lspabst.CanPrepareRename](h)}, nil),
+			LinkedEditingRangeProvider: lo.Ternary(AssertInterface[lspabst.CanLinkedEditingRange](h),
+				&protocol.Or_ServerCapabilities_linkedEditingRangeProvider{Value: true}, nil),
 			InlayHintProvider: lo.Ternary(AssertInterface[lspabst.CanInlayHint](h),
 				&protocol.Or_ServerCapabilities_inlayHintProvider{Value: true}, nil),
 			DocumentSymbolProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentSymbol](h),

@@ -25,6 +25,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [ ] `textDocument/codeLens`: optional navigation or schema summary lenses above DDL statements.
 - [ ] `textDocument/documentLink`: link `PROTO BUNDLE` or import-like references when source paths are available.
 - [x] `textDocument/rename` and `textDocument/prepareRename`: local rename for simple local table symbols.
+- [x] `textDocument/linkedEditingRange`: link exact-case local table declarations and references.
 - [x] `textDocument/typeDefinition`: jump to a uniquely named column type across parsed open documents.
 - [x] `textDocument/implementation`: alias to local table definition lookup for this SQL language server.
 
@@ -41,7 +42,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 
 ## Not Planned For Now
 
-- `documentColor`, `colorPresentation`, `inlineValue`, `linkedEditingRange`, `moniker`, call hierarchy, type hierarchy, telemetry, and notebook support do not have clear practical value for Spanner GoogleSQL editing yet.
+- `documentColor`, `colorPresentation`, `inlineValue`, `moniker`, call hierarchy, type hierarchy, telemetry, and notebook support do not have clear practical value for Spanner GoogleSQL editing yet.
 
 ## Limitations
 

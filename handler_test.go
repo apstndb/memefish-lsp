@@ -753,6 +753,31 @@ func TestRenameReturnsWorkspaceEditForLocalTableReferences(t *testing.T) {
 	}
 }
 
+func TestLinkedEditingRangeReturnsMatchingLocalTableRanges(t *testing.T) {
+	const path = "/test.sql"
+	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"
+	h := newParsedTestHandler(t, path, text)
+
+	got, err := h.LinkedEditingRange(context.Background(), &protocol.LinkedEditingRangeParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     protocol.Position{Line: 1, Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got.Ranges) != 2 {
+		t.Fatalf("LinkedEditingRange() = %#v, want declaration and reference", got)
+	}
+	if got.Ranges[0].Start.Line != 0 || got.Ranges[1].Start.Line != 1 {
+		t.Fatalf("LinkedEditingRange() ranges = %#v", got.Ranges)
+	}
+	if got.WordPattern == "" {
+		t.Fatal("LinkedEditingRange() word pattern is empty")
+	}
+}
+
 func newParsedTestHandler(t *testing.T, path, text string) *Handler {
 	t.Helper()
 	h := NewHandler(slog.Default(), nil)
