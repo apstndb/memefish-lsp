@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -691,6 +693,74 @@ func TestSymbolReturnsFuzzyMatchedSchemaSymbolsAcrossOpenDocuments(t *testing.T)
 		if symbol.Location.URI != "file:///albums.sql" {
 			t.Fatalf("Symbol() URI = %q, want albums document", symbol.Location.URI)
 		}
+	}
+}
+
+func TestInitializeIndexesWorkspaceSQLFiles(t *testing.T) {
+	root := t.TempDir()
+	schemaPath := filepath.Join(root, "schema.sql")
+	if err := os.WriteFile(schemaPath, []byte("CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ignored.txt"), []byte("CREATE TABLE Ignored (Id INT64) PRIMARY KEY (Id)"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(slog.Default(), nil)
+
+	_, err := h.Initialize(context.Background(), &protocol.ParamInitialize{
+		WorkspaceFoldersInitializeParams: protocol.WorkspaceFoldersInitializeParams{
+			WorkspaceFolders: []protocol.WorkspaceFolder{{
+				URI:  protocol.URI("file://" + filepath.ToSlash(root)),
+				Name: "test",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Symbol(context.Background(), &protocol.WorkspaceSymbolParams{Query: "Singers"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "Singers" {
+		t.Fatalf("Symbol() = %#v, want indexed Singers table", got)
+	}
+	ignored, err := h.Symbol(context.Background(), &protocol.WorkspaceSymbolParams{Query: "Ignored"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ignored) != 0 {
+		t.Fatalf("Symbol() indexed non-SQL file: %#v", ignored)
+	}
+}
+
+func TestDidCloseRestoresIndexedWorkspaceFile(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "schema.sql")
+	const saved = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)"
+	if err := os.WriteFile(path, []byte(saved), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(slog.Default(), nil)
+	if err := h.indexWorkspaceFolder(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingClient{}
+	h.SetClient(client)
+	uri := protocol.DocumentURI("file://" + filepath.ToSlash(path))
+
+	if err := h.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{URI: uri, Text: "CREATE TABLE Artists (ArtistId INT64) PRIMARY KEY (ArtistId)"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.fileToContentMap[path]); got != saved {
+		t.Fatalf("DidClose() restored %q, want %q", got, saved)
 	}
 }
 

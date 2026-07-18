@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -71,6 +72,8 @@ type Handler struct {
 	fileContentMu                 sync.Mutex
 	fileToContentMap              map[string][]byte
 	parsedMap                     map[string][]ast.Statement
+	openDocumentMap               map[string]struct{}
+	workspaceFileMap              map[string]struct{}
 	tokenTypeMap                  map[protocol.SemanticTokenTypes]uint32
 	tokenModifierMap              map[protocol.SemanticTokenModifiers]uint32
 	supportedDefinitionLinkClient bool
@@ -1785,10 +1788,19 @@ func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDoc
 	if err := h.clearDiagnostics(ctx, params.TextDocument.URI); err != nil {
 		return err
 	}
+	path := params.TextDocument.URI.Path()
 	h.fileContentMu.Lock()
-	defer h.fileContentMu.Unlock()
-	delete(h.fileToContentMap, params.TextDocument.URI.Path())
-	delete(h.parsedMap, params.TextDocument.URI.Path())
+	delete(h.openDocumentMap, path)
+	_, indexed := h.workspaceFileMap[path]
+	h.fileContentMu.Unlock()
+	if indexed {
+		h.restoreWorkspaceFile(path)
+		return nil
+	}
+	h.fileContentMu.Lock()
+	delete(h.fileToContentMap, path)
+	delete(h.parsedMap, path)
+	h.fileContentMu.Unlock()
 	return nil
 }
 
@@ -1809,7 +1821,28 @@ func (h *Handler) clearDiagnostics(ctx context.Context, uri protocol.DocumentURI
 
 func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) (err error) {
 	err = h.parse(ctx, params.TextDocument.URI, params.TextDocument.Text)
+	h.fileContentMu.Lock()
+	h.openDocumentMap[params.TextDocument.URI.Path()] = struct{}{}
+	h.fileContentMu.Unlock()
 	return err
+}
+
+func (h *Handler) restoreWorkspaceFile(path string) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		h.logger.Warn("failed to restore workspace file", slog.String("path", path), slog.Any("err", err))
+		h.fileContentMu.Lock()
+		delete(h.workspaceFileMap, path)
+		delete(h.fileToContentMap, path)
+		delete(h.parsedMap, path)
+		h.fileContentMu.Unlock()
+		return
+	}
+	parsed, _ := memefish.ParseStatements(path, string(content))
+	h.fileContentMu.Lock()
+	h.fileToContentMap[path] = content
+	h.parsedMap[path] = parsed
+	h.fileContentMu.Unlock()
 }
 
 func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text string) error {
@@ -1878,6 +1911,77 @@ func NewHandler(logger *slog.Logger, importPaths []string) *Handler {
 		importPaths:      importPaths,
 		fileToContentMap: make(map[string][]byte),
 		parsedMap:        make(map[string][]ast.Statement),
+		openDocumentMap:  make(map[string]struct{}),
+		workspaceFileMap: make(map[string]struct{}),
+	}
+}
+
+func (h *Handler) indexWorkspaceFolders(ctx context.Context, params *protocol.ParamInitialize) {
+	roots := []string{}
+	for _, folder := range params.WorkspaceFolders {
+		uri := string(folder.URI)
+		if strings.HasPrefix(uri, "file://") {
+			roots = append(roots, protocol.DocumentURI(uri).Path())
+		}
+	}
+	if len(roots) == 0 && strings.HasPrefix(string(params.RootURI), "file://") {
+		roots = append(roots, params.RootURI.Path())
+	}
+	for _, root := range roots {
+		if err := h.indexWorkspaceFolder(ctx, root); err != nil {
+			h.logger.Warn("failed to index workspace folder", slog.String("root", root), slog.Any("err", err))
+		}
+	}
+}
+
+func (h *Handler) indexWorkspaceFolder(ctx context.Context, root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			h.logger.Warn("failed to inspect workspace path", slog.String("path", path), slog.Any("err", walkErr))
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if path != root && isIgnoredWorkspaceDirectory(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isWorkspaceSQLFile(path) {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			h.logger.Warn("failed to read workspace file", slog.String("path", path), slog.Any("err", err))
+			return nil
+		}
+		parsed, _ := memefish.ParseStatements(path, string(content))
+		h.fileContentMu.Lock()
+		h.fileToContentMap[path] = content
+		h.parsedMap[path] = parsed
+		h.workspaceFileMap[path] = struct{}{}
+		h.fileContentMu.Unlock()
+		return nil
+	})
+}
+
+func isWorkspaceSQLFile(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".sql", ".memefish":
+		return true
+	default:
+		return false
+	}
+}
+
+func isIgnoredWorkspaceDirectory(name string) bool {
+	switch name {
+	case ".git", ".hg", ".svn", "node_modules", "vendor":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1899,6 +2003,7 @@ func sliceToMap[K comparable, V, Elem any](s []Elem, f func(index int, elem Elem
 }
 
 func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitialize) (*protocol.InitializeResult, error) {
+	h.indexWorkspaceFolders(ctx, params)
 	textDocument := params.Capabilities.TextDocument
 	semanticTokens := textDocument.SemanticTokens
 
@@ -1923,6 +2028,9 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 			Version: "v0.0.0-devel",
 		},
 		Capabilities: protocol.ServerCapabilities{
+			Workspace: &protocol.WorkspaceOptions{
+				WorkspaceFolders: &protocol.WorkspaceFolders5Gn{Supported: true},
+			},
 			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h),
 				&protocol.TextDocumentSyncOptions{
 					OpenClose: true,

@@ -36,8 +36,9 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [x] `completionItem/resolve`: add deferred signatures and summaries for function completions.
 - [ ] `codeAction/resolve`: add only after code actions are implemented.
 - [ ] `codeLens/resolve`: add only after code lenses are implemented.
-- [x] `workspace/symbol`: expose schema objects across parsed open documents.
-- [ ] Workspace file events and workspace folders: useful after multi-file schema indexing exists.
+- [x] `workspace/symbol`: expose schema objects across open and indexed workspace documents.
+- [x] Workspace folder indexing: parse `.sql` and `.memefish` files from initial workspace folders.
+- [ ] Workspace file events: update the index when files are created, renamed, or deleted.
 - [x] Pull document diagnostics: return full/unchanged memefish parse reports while retaining publish diagnostics.
 - [ ] Workspace diagnostics: add after workspace files are indexed beyond open documents.
 
@@ -51,7 +52,7 @@ These are memefish-side limitations that affect richer LSP features. Some can be
 
 - No semantic catalog or resolver: table, view, column, CTE, alias, proto type, function, and parameter references must be resolved by `memefish-lsp`.
 - No query type inference: hover, completion, `typeDefinition`, signature help, and column-aware diagnostics need a separate GoogleSQL type model.
-- No built-in schema index: cross-file/workspace navigation requires `memefish-lsp` to parse DDL files and maintain its own index.
+- Workspace indexing is extension-based and local: only `.sql` and `.memefish` files under file-scheme workspace folders are indexed.
 - No function catalog/signature metadata: GoogleSQL function completion and signature help need an external catalog of names, overloads, argument names, return types, and docs.
 - No comment-preserving formatter: `ast.Node.SQL()` unparses AST nodes and is not a full-fidelity pretty printer, so formatting can lose comments or intentional layout.
 - Limited support for incomplete-code workflows: completion and code actions often need useful partial ASTs around syntactically invalid text.
