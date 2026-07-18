@@ -15,7 +15,13 @@ import (
 
 type recordingClient struct {
 	protocol.Client
-	diagnostics []*protocol.PublishDiagnosticsParams
+	diagnostics    []*protocol.PublishDiagnosticsParams
+	shownDocuments []*protocol.ShowDocumentParams
+}
+
+func (c *recordingClient) ShowDocument(_ context.Context, params *protocol.ShowDocumentParams) (*protocol.ShowDocumentResult, error) {
+	c.shownDocuments = append(c.shownDocuments, params)
+	return &protocol.ShowDocumentResult{Success: true}, nil
 }
 
 func (c *recordingClient) PublishDiagnostics(_ context.Context, params *protocol.PublishDiagnosticsParams) error {
@@ -934,6 +940,37 @@ func TestReferencesReturnsLocalTableReferences(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("References() returned %d locations, want declaration and use: %#v", len(got), got)
+	}
+}
+
+func TestCodeLensOpensFirstLocalTableReference(t *testing.T) {
+	const path = "/test.sql"
+	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"
+	h := newParsedTestHandler(t, path, text)
+	client := &recordingClient{}
+	h.SetClient(client)
+
+	lenses, err := h.CodeLens(context.Background(), &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lenses) != 1 || lenses[0].Command == nil || lenses[0].Command.Title != "1 reference" {
+		t.Fatalf("CodeLens() = %#v, want one reference lens", lenses)
+	}
+	if _, err := h.ExecuteCommand(context.Background(), &protocol.ExecuteCommandParams{
+		Command:   lenses[0].Command.Command,
+		Arguments: lenses[0].Command.Arguments,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(client.shownDocuments) != 1 {
+		t.Fatalf("ExecuteCommand() showed %d documents, want 1", len(client.shownDocuments))
+	}
+	shown := client.shownDocuments[0]
+	if shown.URI != "file:///test.sql" || shown.Selection == nil || shown.Selection.Start.Line != 1 {
+		t.Fatalf("ExecuteCommand() ShowDocument = %#v, want SELECT reference", shown)
 	}
 }
 

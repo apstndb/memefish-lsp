@@ -23,7 +23,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 ## Medium Value
 
 - [x] `textDocument/hover`: show local table DDL and uniquely resolved column definitions.
-- [ ] `textDocument/codeLens`: optional navigation or schema summary lenses above DDL statements.
+- [x] `textDocument/codeLens`: show local table reference counts above DDL and open the first reference.
 - [ ] `textDocument/documentLink`: link `PROTO BUNDLE` or import-like references when source paths are available.
 - [x] `textDocument/rename` and `textDocument/prepareRename`: local rename for simple local table symbols.
 - [x] `textDocument/linkedEditingRange`: link exact-case local table declarations and references.

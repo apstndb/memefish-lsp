@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -37,6 +38,7 @@ var _ interface {
 	lspabst.CanDidSave
 	lspabst.CanCompletion
 	lspabst.CanCodeAction
+	lspabst.CanCodeLens
 	lspabst.CanDeclaration
 	lspabst.CanDefinition
 	lspabst.CanDiagnostic
@@ -58,12 +60,15 @@ var _ interface {
 	lspabst.CanOnTypeFormatting
 	lspabst.TextDocumentSyncCapability
 	lspabst.CanDocumentSymbol
+	lspabst.CanExecuteCommand
 	lspabst.CanFoldingRange
 	lspabst.CanFormatting
 	lspabst.CanSelectionRange
 	lspabst.CanSymbol
 	lspabst.CanTypeDefinition
 } = (*Handler)(nil)
+
+const openReferenceCommand = "memefish.openReference"
 
 type Handler struct {
 	logger                        *slog.Logger
@@ -1135,6 +1140,82 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 		return true
 	})
 	return result, nil
+}
+
+func tableReferenceLocations(uri protocol.DocumentURI, lex *memefish.Lexer, stmts []ast.Statement, target string) []protocol.Location {
+	result := []protocol.Location{}
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.PathTableExpr:
+			if strings.EqualFold(pathName(n.Path), target) {
+				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Path)})
+			}
+		case *ast.TableName:
+			if strings.EqualFold(identName(n.Table), target) {
+				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Table)})
+			}
+		}
+		return true
+	})
+	return result
+}
+
+func (h *Handler) CodeLens(_ context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	uri := params.TextDocument.URI
+	path := uri.Path()
+	stmts := h.parsedMap[path]
+	lex := newLexer(path, string(h.fileToContentMap[path]))
+	result := []protocol.CodeLens{}
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		table, ok := node.(*ast.CreateTable)
+		if !ok || !isSimplePath(table.Name) {
+			return true
+		}
+		references := tableReferenceLocations(uri, lex, stmts, pathName(table.Name))
+		if len(references) == 0 {
+			return false
+		}
+		argument, err := json.Marshal(references[0])
+		if err != nil {
+			return false
+		}
+		nameRange := rangeByNode(lex, table.Name)
+		result = append(result, protocol.CodeLens{
+			Range: protocol.Range{Start: nameRange.Start, End: nameRange.Start},
+			Command: &protocol.Command{
+				Title:     fmt.Sprintf("%d %s", len(references), lo.Ternary(len(references) == 1, "reference", "references")),
+				Command:   openReferenceCommand,
+				Arguments: []json.RawMessage{argument},
+			},
+		})
+		return false
+	})
+	return result, nil
+}
+
+func (h *Handler) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (interface{}, error) {
+	if params.Command != openReferenceCommand {
+		return nil, fmt.Errorf("unsupported command %q", params.Command)
+	}
+	if len(params.Arguments) != 1 {
+		return nil, fmt.Errorf("%s expects one location argument", openReferenceCommand)
+	}
+	var location protocol.Location
+	if err := json.Unmarshal(params.Arguments[0], &location); err != nil {
+		return nil, fmt.Errorf("decode reference location: %w", err)
+	}
+	client, err := h.Client()
+	if err != nil {
+		return nil, err
+	}
+	return client.ShowDocument(ctx, &protocol.ShowDocumentParams{
+		URI:       protocol.URI(location.URI),
+		TakeFocus: true,
+		Selection: &location.Range,
+	})
 }
 
 func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (*protocol.PrepareRenameResult, error) {
@@ -2261,6 +2342,10 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 			},
 			FoldingRangeProvider: lo.Ternary(AssertInterface[lspabst.CanFoldingRange](h),
 				&protocol.Or_ServerCapabilities_foldingRangeProvider{Value: true}, nil),
+			CodeLensProvider: lo.Ternary(AssertInterface[lspabst.CanCodeLens](h),
+				&protocol.CodeLensOptions{}, nil),
+			ExecuteCommandProvider: lo.Ternary(AssertInterface[lspabst.CanExecuteCommand](h),
+				&protocol.ExecuteCommandOptions{Commands: []string{openReferenceCommand}}, nil),
 			HoverProvider: lo.Ternary(AssertInterface[lspabst.CanHover](h),
 				&protocol.Or_ServerCapabilities_hoverProvider{Value: true}, nil),
 			SignatureHelpProvider: lo.Ternary(AssertInterface[lspabst.CanSignatureHelp](h),
