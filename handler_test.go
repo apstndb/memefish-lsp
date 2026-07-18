@@ -354,6 +354,27 @@ func TestRangeFormattingPreservesCommentsInSelection(t *testing.T) {
 	}
 }
 
+func TestRangesFormattingFormatsMultipleStatements(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT  1;\nSELECT  2"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.RangesFormatting(context.Background(), &protocol.DocumentRangesFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Ranges: []protocol.Range{
+			{Start: protocol.Position{}, End: protocol.Position{Character: 9}},
+			{Start: protocol.Position{Line: 1}, End: protocol.Position{Line: 1, Character: 9}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].NewText != "SELECT 1" || got[1].NewText != "SELECT 2" {
+		t.Fatalf("RangesFormatting() = %#v, want two formatted statements", got)
+	}
+}
+
 func TestOnTypeFormattingFormatsStatementBeforeSemicolon(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT  1;"

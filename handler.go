@@ -43,6 +43,7 @@ var _ interface {
 	lspabst.CanImplementation
 	lspabst.CanPrepareRename
 	lspabst.CanRangeFormatting
+	lspabst.CanRangesFormatting
 	lspabst.CanReferences
 	lspabst.CanRename
 	lspabst.CanResolveCompletionItem
@@ -746,23 +747,47 @@ func (h *Handler) RangeFormatting(ctx context.Context, params *protocol.Document
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
-	if rangeHasComments(path, text, params.Range) {
-		return []protocol.TextEdit{}, nil
+	return rangeFormattingEdits(path, text, params.Range), nil
+}
+
+func (h *Handler) RangesFormatting(ctx context.Context, params *protocol.DocumentRangesFormattingParams) ([]protocol.TextEdit, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	result := []protocol.TextEdit{}
+	seen := map[protocol.Range]struct{}{}
+	for _, target := range params.Ranges {
+		for _, edit := range rangeFormattingEdits(path, text, target) {
+			if _, ok := seen[edit.Range]; ok {
+				continue
+			}
+			seen[edit.Range] = struct{}{}
+			result = append(result, edit)
+		}
+	}
+	return result, nil
+}
+
+func rangeFormattingEdits(path, text string, target protocol.Range) []protocol.TextEdit {
+	if rangeHasComments(path, text, target) {
+		return []protocol.TextEdit{}
 	}
 	stmts, err := memefish.ParseStatements(path, text)
 	if err != nil {
-		return []protocol.TextEdit{}, nil
+		return []protocol.TextEdit{}
 	}
 	lex := newLexer(path, text)
 	edits := []protocol.TextEdit{}
 	for _, stmt := range stmts {
 		stmtRange := rangeByNode(lex, stmt)
-		if !rangeContains(params.Range, stmtRange) {
+		if !rangeContains(target, stmtRange) {
 			continue
 		}
 		edits = append(edits, protocol.TextEdit{Range: stmtRange, NewText: stmt.SQL()})
 	}
-	return edits, nil
+	return edits
 }
 
 func (h *Handler) OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) ([]protocol.TextEdit, error) {
@@ -1961,7 +1986,11 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 			DocumentFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanFormatting](h),
 				&protocol.Or_ServerCapabilities_documentFormattingProvider{Value: true}, nil),
 			DocumentRangeFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanRangeFormatting](h),
-				&protocol.Or_ServerCapabilities_documentRangeFormattingProvider{Value: true}, nil),
+				&protocol.Or_ServerCapabilities_documentRangeFormattingProvider{
+					Value: protocol.DocumentRangeFormattingOptions{
+						RangesSupport: AssertInterface[lspabst.CanRangesFormatting](h),
+					},
+				}, nil),
 			DocumentOnTypeFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanOnTypeFormatting](h),
 				&protocol.DocumentOnTypeFormattingOptions{FirstTriggerCharacter: ";"}, nil),
 			SelectionRangeProvider: lo.Ternary(AssertInterface[lspabst.CanSelectionRange](h),
