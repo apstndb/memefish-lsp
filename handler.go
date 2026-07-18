@@ -47,6 +47,7 @@ var _ interface {
 	lspabst.CanRename
 	lspabst.CanResolveCompletionItem
 	lspabst.CanSemanticTokensFull
+	lspabst.CanSemanticTokensFullDelta
 	lspabst.CanSemanticTokensRange
 	lspabst.CanSignatureHelp
 	lspabst.CanHover
@@ -1586,11 +1587,18 @@ loop:
 		data = append(data, uint32(d_line), uint32(d_char), uint32(token.Length), tokenNum, mod)
 	}
 
-	result = &protocol.SemanticTokens{Data: data}
+	result = &protocol.SemanticTokens{
+		ResultID: fmt.Sprintf("%x", sha256.Sum256([]byte(s))),
+		Data:     data,
+	}
 
 	h.logger.Info("SemanticContextFull", slog.Any("result", result))
 
 	return result, err
+}
+
+func (h *Handler) SemanticTokensFullDelta(ctx context.Context, params *protocol.SemanticTokensDeltaParams) (interface{}, error) {
+	return h.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{TextDocument: params.TextDocument})
 }
 
 func (h *Handler) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
@@ -1825,7 +1833,9 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 					TokenTypes:     semanticTokens.TokenTypes,
 					TokenModifiers: semanticTokens.TokenModifiers,
 				},
-				"full":  true,
+				"full": map[string]any{
+					"delta": AssertInterface[lspabst.CanSemanticTokensFullDelta](h),
+				},
 				"range": AssertInterface[lspabst.CanSemanticTokensRange](h),
 			},
 			FoldingRangeProvider: lo.Ternary(AssertInterface[lspabst.CanFoldingRange](h),

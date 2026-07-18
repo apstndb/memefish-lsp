@@ -391,6 +391,26 @@ func TestFilterSemanticTokensReencodesSelectedRange(t *testing.T) {
 	}
 }
 
+func TestSemanticTokensFullDeltaReturnsCurrentFullTokens(t *testing.T) {
+	h := newParsedTestHandler(t, "/test.sql", "SELECT 1")
+	h.tokenTypeMap = map[protocol.SemanticTokenTypes]uint32{
+		protocol.KeywordType: 0,
+		protocol.NumberType:  1,
+	}
+	h.tokenModifierMap = map[protocol.SemanticTokenModifiers]uint32{}
+
+	got, err := h.SemanticTokensFullDelta(context.Background(), &protocol.SemanticTokensDeltaParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, ok := got.(*protocol.SemanticTokens)
+	if !ok || full.ResultID == "" || len(full.Data) == 0 {
+		t.Fatalf("SemanticTokensFullDelta() = %#v, want full tokens with result ID", got)
+	}
+}
+
 func TestCodeActionReturnsInsertASQuickFix(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT SingerId singer FROM Singers"

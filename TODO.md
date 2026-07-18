@@ -9,6 +9,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [x] `textDocument/completion`: keyword and in-document identifier completion.
 - [x] `textDocument/documentHighlight`: highlight occurrences of the identifier under the cursor.
 - [x] `textDocument/semanticTokens/range`: filter and re-encode full semantic tokens for requested ranges.
+- [x] `textDocument/semanticTokens/full/delta`: accept delta requests and return current full tokens with result IDs.
 - [x] `textDocument/definition`: jump from table references to local `CREATE TABLE` definitions.
 - [x] `textDocument/declaration`: use local `CREATE TABLE` definitions as table declarations.
 - [x] `textDocument/references`: find local `CREATE TABLE` declarations and table references.
