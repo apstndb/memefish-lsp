@@ -83,6 +83,28 @@ func TestDefinitionReturnsLocalCreateTableLocation(t *testing.T) {
 	}
 }
 
+func TestImplementationReturnsLocalCreateTableLocation(t *testing.T) {
+	const path = "/test.sql"
+	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"
+	h := newParsedTestHandler(t, path, text)
+
+	got, err := h.Implementation(context.Background(), &protocol.ImplementationParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI("file://" + path)},
+			Position:     protocol.Position{Line: 1, Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Implementation() returned %d locations, want 1: %#v", len(got), got)
+	}
+	if got[0].Range.Start.Line != 0 {
+		t.Fatalf("Implementation() range = %#v, want line 0", got[0].Range)
+	}
+}
+
 func TestReferencesReturnsLocalTableReferences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"

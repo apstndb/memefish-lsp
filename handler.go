@@ -34,6 +34,7 @@ var _ interface {
 	lspabst.CanCompletion
 	lspabst.CanDefinition
 	lspabst.CanDocumentHighlight
+	lspabst.CanImplementation
 	lspabst.CanPrepareRename
 	lspabst.CanReferences
 	lspabst.CanRename
@@ -551,6 +552,14 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 		URI:   uri,
 		Range: rangeByNode(lex, def.Name),
 	}}, nil
+}
+
+func (h *Handler) Implementation(ctx context.Context, params *protocol.ImplementationParams) ([]protocol.Location, error) {
+	return h.Definition(ctx, &protocol.DefinitionParams{
+		TextDocumentPositionParams: params.TextDocumentPositionParams,
+		WorkDoneProgressParams:     params.WorkDoneProgressParams,
+		PartialResultParams:        params.PartialResultParams,
+	})
 }
 
 func (h *Handler) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
@@ -1216,6 +1225,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.CompletionOptions{TriggerCharacters: []string{" ", ".", "_"}}, nil),
 			DefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanDefinition](h),
 				&protocol.Or_ServerCapabilities_definitionProvider{Value: true}, nil),
+			ImplementationProvider: lo.Ternary(AssertInterface[lspabst.CanImplementation](h),
+				&protocol.Or_ServerCapabilities_implementationProvider{Value: true}, nil),
 			DocumentHighlightProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentHighlight](h),
 				&protocol.Or_ServerCapabilities_documentHighlightProvider{Value: true}, nil),
 			ReferencesProvider: lo.Ternary(AssertInterface[lspabst.CanReferences](h),
