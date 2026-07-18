@@ -52,6 +52,7 @@ var _ interface {
 	lspabst.CanSignatureHelp
 	lspabst.CanHover
 	lspabst.CanInlayHint
+	lspabst.CanOnTypeFormatting
 	lspabst.TextDocumentSyncCapability
 	lspabst.CanDocumentSymbol
 	lspabst.CanFoldingRange
@@ -761,6 +762,38 @@ func (h *Handler) RangeFormatting(ctx context.Context, params *protocol.Document
 		edits = append(edits, protocol.TextEdit{Range: stmtRange, NewText: stmt.SQL()})
 	}
 	return edits, nil
+}
+
+func (h *Handler) OnTypeFormatting(ctx context.Context, params *protocol.DocumentOnTypeFormattingParams) ([]protocol.TextEdit, error) {
+	if params.Ch != ";" {
+		return []protocol.TextEdit{}, nil
+	}
+
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	stmts, err := memefish.ParseStatements(path, text)
+	if err != nil {
+		return []protocol.TextEdit{}, nil
+	}
+	lex := newLexer(path, text)
+	var candidate ast.Statement
+	var candidateRange protocol.Range
+	for _, stmt := range stmts {
+		stmtRange := rangeByNode(lex, stmt)
+		if comparePosition(stmtRange.End, params.Position) > 0 {
+			continue
+		}
+		if candidate == nil || comparePosition(candidateRange.End, stmtRange.End) < 0 {
+			candidate = stmt
+			candidateRange = stmtRange
+		}
+	}
+	if candidate == nil || rangeHasComments(path, text, candidateRange) {
+		return []protocol.TextEdit{}, nil
+	}
+	return []protocol.TextEdit{{Range: candidateRange, NewText: candidate.SQL()}}, nil
 }
 
 func formatGoogleSQL(path, text string) (string, bool) {
@@ -1884,6 +1917,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_documentFormattingProvider{Value: true}, nil),
 			DocumentRangeFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanRangeFormatting](h),
 				&protocol.Or_ServerCapabilities_documentRangeFormattingProvider{Value: true}, nil),
+			DocumentOnTypeFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanOnTypeFormatting](h),
+				&protocol.DocumentOnTypeFormattingOptions{FirstTriggerCharacter: ";"}, nil),
 			SelectionRangeProvider: lo.Ternary(AssertInterface[lspabst.CanSelectionRange](h),
 				&protocol.Or_ServerCapabilities_selectionRangeProvider{Value: true}, nil),
 			// DefinitionProvider: true,

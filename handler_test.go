@@ -354,6 +354,45 @@ func TestRangeFormattingPreservesCommentsInSelection(t *testing.T) {
 	}
 }
 
+func TestOnTypeFormattingFormatsStatementBeforeSemicolon(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT  1;"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.OnTypeFormatting(context.Background(), &protocol.DocumentOnTypeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Position:     protocol.Position{Character: uint32(len(text))},
+		Ch:           ";",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].NewText != "SELECT 1" {
+		t.Fatalf("OnTypeFormatting() = %#v, want formatted statement", got)
+	}
+	if got[0].Range.End.Character != uint32(len(text)-1) {
+		t.Fatalf("OnTypeFormatting() range = %#v, want semicolon excluded", got[0].Range)
+	}
+}
+
+func TestOnTypeFormattingIgnoresOtherCharacters(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap["/test.sql"] = []byte("SELECT  1")
+
+	got, err := h.OnTypeFormatting(context.Background(), &protocol.DocumentOnTypeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Position:     protocol.Position{Character: 9},
+		Ch:           " ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("OnTypeFormatting() returned edits for non-trigger character: %#v", got)
+	}
+}
+
 func TestDocumentHighlightHighlightsIdentifierOccurrences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT singer_id FROM Singers WHERE singer_id = 1"
