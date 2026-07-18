@@ -38,6 +38,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [ ] `codeLens/resolve`: add only after code lenses are implemented.
 - [x] `workspace/symbol`: expose schema objects across open and indexed workspace documents.
 - [x] Workspace folder indexing: parse `.sql` and `.memefish` files from initial workspace folders.
+- [x] Workspace folder changes: add and remove indexed roots from `workspace/didChangeWorkspaceFolders`.
 - [x] Workspace file events: update the index when SQL files are created, changed, renamed, or deleted.
 - [x] Pull document diagnostics: return full/unchanged memefish parse reports while retaining publish diagnostics.
 - [ ] Workspace diagnostics: add after workspace files are indexed beyond open documents.

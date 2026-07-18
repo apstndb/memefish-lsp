@@ -837,6 +837,45 @@ func TestWorkspaceFileEventsMaintainIndex(t *testing.T) {
 	}
 }
 
+func TestDidChangeWorkspaceFoldersUpdatesIndex(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "schema.sql")
+	if err := os.WriteFile(path, []byte("CREATE TABLE Venues (VenueId INT64) PRIMARY KEY (VenueId)"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(slog.Default(), nil)
+	folder := protocol.WorkspaceFolder{
+		URI:  protocol.URI("file://" + filepath.ToSlash(root)),
+		Name: "schema",
+	}
+
+	if err := h.DidChangeWorkspaceFolders(context.Background(), &protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{Added: []protocol.WorkspaceFolder{folder}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.Symbol(context.Background(), &protocol.WorkspaceSymbolParams{Query: "Venues"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Name != "Venues" {
+		t.Fatalf("DidChangeWorkspaceFolders() added symbols = %#v, want Venues", got)
+	}
+
+	if err := h.DidChangeWorkspaceFolders(context.Background(), &protocol.DidChangeWorkspaceFoldersParams{
+		Event: protocol.WorkspaceFoldersChangeEvent{Removed: []protocol.WorkspaceFolder{folder}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = h.Symbol(context.Background(), &protocol.WorkspaceSymbolParams{Query: "Venues"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("DidChangeWorkspaceFolders() retained removed symbols: %#v", got)
+	}
+}
+
 func TestReferencesReturnsLocalTableReferences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"

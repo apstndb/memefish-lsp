@@ -74,6 +74,7 @@ type Handler struct {
 	parsedMap                     map[string][]ast.Statement
 	openDocumentMap               map[string]struct{}
 	workspaceFileMap              map[string]struct{}
+	workspaceRootMap              map[string]struct{}
 	tokenTypeMap                  map[protocol.SemanticTokenTypes]uint32
 	tokenModifierMap              map[protocol.SemanticTokenModifiers]uint32
 	supportedDefinitionLinkClient bool
@@ -2000,6 +2001,7 @@ func NewHandler(logger *slog.Logger, importPaths []string) *Handler {
 		parsedMap:        make(map[string][]ast.Statement),
 		openDocumentMap:  make(map[string]struct{}),
 		workspaceFileMap: make(map[string]struct{}),
+		workspaceRootMap: make(map[string]struct{}),
 	}
 }
 
@@ -2022,6 +2024,17 @@ func (h *Handler) indexWorkspaceFolders(ctx context.Context, params *protocol.Pa
 }
 
 func (h *Handler) indexWorkspaceFolder(ctx context.Context, root string) error {
+	root = filepath.Clean(root)
+	info, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("workspace root is not a directory: %s", root)
+	}
+	h.fileContentMu.Lock()
+	h.workspaceRootMap[root] = struct{}{}
+	h.fileContentMu.Unlock()
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			h.logger.Warn("failed to inspect workspace path", slog.String("path", path), slog.Any("err", walkErr))
@@ -2042,6 +2055,54 @@ func (h *Handler) indexWorkspaceFolder(ctx context.Context, root string) error {
 		h.indexWorkspaceFile(path)
 		return nil
 	})
+}
+
+func (h *Handler) DidChangeWorkspaceFolders(ctx context.Context, params *protocol.DidChangeWorkspaceFoldersParams) error {
+	for _, folder := range params.Event.Removed {
+		path, ok := fileURIPath(string(folder.URI))
+		if !ok {
+			continue
+		}
+		h.removeWorkspaceFolder(path)
+	}
+	for _, folder := range params.Event.Added {
+		path, ok := fileURIPath(string(folder.URI))
+		if !ok {
+			continue
+		}
+		if err := h.indexWorkspaceFolder(ctx, path); err != nil {
+			h.logger.Warn("failed to index added workspace folder", slog.String("root", path), slog.Any("err", err))
+		}
+	}
+	return nil
+}
+
+func (h *Handler) removeWorkspaceFolder(root string) {
+	root = filepath.Clean(root)
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+	delete(h.workspaceRootMap, root)
+	for path := range h.workspaceFileMap {
+		if h.pathInWorkspaceLocked(path) {
+			continue
+		}
+		delete(h.workspaceFileMap, path)
+		if _, open := h.openDocumentMap[path]; open {
+			continue
+		}
+		delete(h.fileToContentMap, path)
+		delete(h.parsedMap, path)
+	}
+}
+
+func (h *Handler) pathInWorkspaceLocked(path string) bool {
+	for root := range h.workspaceRootMap {
+		rel, err := filepath.Rel(root, path)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func isWorkspaceSQLFile(path string) bool {
@@ -2118,7 +2179,10 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 		},
 		Capabilities: protocol.ServerCapabilities{
 			Workspace: &protocol.WorkspaceOptions{
-				WorkspaceFolders: &protocol.WorkspaceFolders5Gn{Supported: true},
+				WorkspaceFolders: &protocol.WorkspaceFolders5Gn{
+					Supported:           true,
+					ChangeNotifications: "memefish-workspace-folders",
+				},
 				FileOperations: &protocol.FileOperationOptions{
 					DidCreate: workspaceFileOperationOptions(),
 					DidRename: workspaceFileOperationOptions(),
