@@ -176,6 +176,29 @@ func TestDidSaveReparsesIncludedText(t *testing.T) {
 	}
 }
 
+func TestDidCloseClearsDiagnosticsAndDocumentState(t *testing.T) {
+	const path = "/test.sql"
+	h := newParsedTestHandler(t, path, "SELECT 1")
+	client := &recordingClient{}
+	h.SetClient(client)
+
+	err := h.DidClose(context.Background(), &protocol.DidCloseTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.fileToContentMap[path]; ok {
+		t.Fatal("DidClose() retained document content")
+	}
+	if _, ok := h.parsedMap[path]; ok {
+		t.Fatal("DidClose() retained parsed document")
+	}
+	if len(client.diagnostics) != 1 || len(client.diagnostics[0].Diagnostics) != 0 {
+		t.Fatalf("published diagnostics = %#v, want one empty update", client.diagnostics)
+	}
+}
+
 func TestDiagnosticReturnsFullAndUnchangedReports(t *testing.T) {
 	const path = "/test.sql"
 	h := NewHandler(slog.Default(), nil)

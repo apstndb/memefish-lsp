@@ -1673,7 +1673,14 @@ func (h *Handler) Diagnostic(ctx context.Context, params *protocol.DocumentDiagn
 }
 
 func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error) {
-	return h.clearDiagnostics(ctx, params.TextDocument.URI)
+	if err := h.clearDiagnostics(ctx, params.TextDocument.URI); err != nil {
+		return err
+	}
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+	delete(h.fileToContentMap, params.TextDocument.URI.Path())
+	delete(h.parsedMap, params.TextDocument.URI.Path())
+	return nil
 }
 
 func (h *Handler) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error {
