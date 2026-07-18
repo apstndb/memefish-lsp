@@ -36,6 +36,7 @@ var _ interface {
 	lspabst.CanDidSave
 	lspabst.CanCompletion
 	lspabst.CanCodeAction
+	lspabst.CanDeclaration
 	lspabst.CanDefinition
 	lspabst.CanDiagnostic
 	lspabst.CanDocumentHighlight
@@ -992,6 +993,18 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 	}}, nil
 }
 
+func (h *Handler) Declaration(ctx context.Context, params *protocol.DeclarationParams) (*protocol.Or_textDocument_declaration, error) {
+	locations, err := h.Definition(ctx, &protocol.DefinitionParams{
+		TextDocumentPositionParams: params.TextDocumentPositionParams,
+		WorkDoneProgressParams:     params.WorkDoneProgressParams,
+		PartialResultParams:        params.PartialResultParams,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &protocol.Or_textDocument_declaration{Value: protocol.Declaration(locations)}, nil
+}
+
 func (h *Handler) Implementation(ctx context.Context, params *protocol.ImplementationParams) ([]protocol.Location, error) {
 	return h.Definition(ctx, &protocol.DefinitionParams{
 		TextDocumentPositionParams: params.TextDocumentPositionParams,
@@ -1766,6 +1779,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				}, nil),
 			DefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanDefinition](h),
 				&protocol.Or_ServerCapabilities_definitionProvider{Value: true}, nil),
+			DeclarationProvider: lo.Ternary(AssertInterface[lspabst.CanDeclaration](h),
+				&protocol.Or_ServerCapabilities_declarationProvider{Value: true}, nil),
 			DiagnosticProvider: lo.Ternary(AssertInterface[lspabst.CanDiagnostic](h),
 				&protocol.Or_ServerCapabilities_diagnosticProvider{Value: protocol.DiagnosticOptions{
 					Identifier:            "memefish",
