@@ -21,7 +21,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [ ] `textDocument/codeLens`: optional navigation or schema summary lenses above DDL statements.
 - [ ] `textDocument/documentLink`: link `PROTO BUNDLE` or import-like references when source paths are available.
 - [x] `textDocument/rename` and `textDocument/prepareRename`: local rename for simple local table symbols.
-- [ ] `textDocument/typeDefinition`: jump from column references to column type definitions where known.
+- [x] `textDocument/typeDefinition`: jump to a uniquely named column type across parsed open documents.
 - [x] `textDocument/implementation`: alias to local table definition lookup for this SQL language server.
 
 ## Low Value Or Client/Workspace Dependent

@@ -140,6 +140,50 @@ func TestImplementationReturnsLocalCreateTableLocation(t *testing.T) {
 	}
 }
 
+func TestTypeDefinitionReturnsUniqueColumnSchemaType(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/query.sql", "SELECT SingerId FROM Singers")
+
+	got, err := h.TypeDefinition(context.Background(), &protocol.TypeDefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Line: 0, Character: 9},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("TypeDefinition() returned %d locations, want 1: %#v", len(got), got)
+	}
+	if got[0].URI != "file:///schema.sql" {
+		t.Fatalf("TypeDefinition() URI = %q, want schema document", got[0].URI)
+	}
+	if got[0].Range.Start.Line != 0 || got[0].Range.Start.Character != 31 {
+		t.Fatalf("TypeDefinition() range = %#v, want INT64 type", got[0].Range)
+	}
+}
+
+func TestTypeDefinitionRejectsAmbiguousColumnName(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (Id INT64) PRIMARY KEY (Id); CREATE TABLE Albums (Id INT64) PRIMARY KEY (Id)")
+	addParsedTestDocument(t, h, "/query.sql", "SELECT Id FROM Singers")
+
+	got, err := h.TypeDefinition(context.Background(), &protocol.TypeDefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Line: 0, Character: 8},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("TypeDefinition() returned ambiguous locations: %#v", got)
+	}
+}
+
 func TestSymbolReturnsFuzzyMatchedSchemaSymbolsAcrossOpenDocuments(t *testing.T) {
 	h := NewHandler(slog.Default(), nil)
 	addParsedTestDocument(t, h, "/singers.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")

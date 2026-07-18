@@ -47,6 +47,7 @@ var _ interface {
 	lspabst.CanFoldingRange
 	lspabst.CanSelectionRange
 	lspabst.CanSymbol
+	lspabst.CanTypeDefinition
 } = (*Handler)(nil)
 
 type Handler struct {
@@ -653,6 +654,37 @@ func (h *Handler) Implementation(ctx context.Context, params *protocol.Implement
 		WorkDoneProgressParams:     params.WorkDoneProgressParams,
 		PartialResultParams:        params.PartialResultParams,
 	})
+}
+
+func (h *Handler) TypeDefinition(ctx context.Context, params *protocol.TypeDefinitionParams) ([]protocol.Location, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	columnName, ok := identifierAtPosition(path, string(h.fileToContentMap[path]), params.Position)
+	if !ok {
+		return []protocol.Location{}, nil
+	}
+
+	matches := []protocol.Location{}
+	for definitionPath, stmts := range h.parsedMap {
+		lex := newLexer(definitionPath, string(h.fileToContentMap[definitionPath]))
+		memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+			column, ok := node.(*ast.ColumnDef)
+			if !ok || !strings.EqualFold(identName(column.Name), columnName) {
+				return true
+			}
+			matches = append(matches, protocol.Location{
+				URI:   protocol.DocumentURI("file://" + definitionPath),
+				Range: rangeByNode(lex, column.Type),
+			})
+			return true
+		})
+	}
+	if len(matches) != 1 {
+		return []protocol.Location{}, nil
+	}
+	return matches, nil
 }
 
 func (h *Handler) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
@@ -1332,6 +1364,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_definitionProvider{Value: true}, nil),
 			ImplementationProvider: lo.Ternary(AssertInterface[lspabst.CanImplementation](h),
 				&protocol.Or_ServerCapabilities_implementationProvider{Value: true}, nil),
+			TypeDefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanTypeDefinition](h),
+				&protocol.Or_ServerCapabilities_typeDefinitionProvider{Value: true}, nil),
 			DocumentHighlightProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentHighlight](h),
 				&protocol.Or_ServerCapabilities_documentHighlightProvider{Value: true}, nil),
 			ReferencesProvider: lo.Ternary(AssertInterface[lspabst.CanReferences](h),
