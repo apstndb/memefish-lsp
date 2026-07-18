@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/apstndb/go-lsp-export/protocol"
@@ -181,6 +182,50 @@ func TestTypeDefinitionRejectsAmbiguousColumnName(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("TypeDefinition() returned ambiguous locations: %#v", got)
+	}
+}
+
+func TestHoverDescribesLocalTable(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/query.sql", "SELECT SingerId FROM Singers")
+
+	got, err := h.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Line: 0, Character: 23},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !strings.Contains(got.Contents.Value, "CREATE TABLE Singers") {
+		t.Fatalf("Hover() = %#v, want table DDL", got)
+	}
+	if got.Range.Start.Character != 21 || got.Range.End.Character != 28 {
+		t.Fatalf("Hover() range = %#v, want table reference", got.Range)
+	}
+}
+
+func TestHoverDescribesUniqueColumn(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/query.sql", "SELECT SingerId FROM Singers")
+
+	got, err := h.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Line: 0, Character: 9},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !strings.Contains(got.Contents.Value, "SingerId INT64") {
+		t.Fatalf("Hover() = %#v, want column definition", got)
+	}
+	if got.Range.Start.Character != 7 || got.Range.End.Character != 15 {
+		t.Fatalf("Hover() range = %#v, want column reference", got.Range)
 	}
 }
 

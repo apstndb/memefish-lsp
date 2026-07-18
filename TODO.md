@@ -17,7 +17,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 
 ## Medium Value
 
-- [ ] `textDocument/hover`: replace current AST debug hover with user-facing symbol/type help.
+- [x] `textDocument/hover`: show local table DDL and uniquely resolved column definitions.
 - [ ] `textDocument/codeLens`: optional navigation or schema summary lenses above DDL statements.
 - [ ] `textDocument/documentLink`: link `PROTO BUNDLE` or import-like references when source paths are available.
 - [x] `textDocument/rename` and `textDocument/prepareRename`: local rename for simple local table symbols.

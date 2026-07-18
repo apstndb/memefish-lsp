@@ -605,19 +605,24 @@ func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.Docume
 }
 
 func identifierAtPosition(path, text string, pos protocol.Position) (string, bool) {
+	name, _, ok := identifierAtPositionWithRange(path, text, pos)
+	return name, ok
+}
+
+func identifierAtPositionWithRange(path, text string, pos protocol.Position) (string, protocol.Range, bool) {
 	lex := newLexer(path, text)
 	for tok, err := range gsqlutils.LexerSeq(lex) {
 		if err != nil {
-			return "", false
+			return "", protocol.Range{}, false
 		}
 		if tok.Kind != token.TokenIdent {
 			continue
 		}
 		if include(lex.Position(tok.Pos, tok.End), pos) {
-			return tok.AsString, true
+			return tok.AsString, tokenRange(lex, tok.Pos, tok.End), true
 		}
 	}
-	return "", false
+	return "", protocol.Range{}, false
 }
 
 func tokenRange(lex *memefish.Lexer, pos, end token.Pos) protocol.Range {
@@ -666,25 +671,14 @@ func (h *Handler) TypeDefinition(ctx context.Context, params *protocol.TypeDefin
 		return []protocol.Location{}, nil
 	}
 
-	matches := []protocol.Location{}
-	for definitionPath, stmts := range h.parsedMap {
-		lex := newLexer(definitionPath, string(h.fileToContentMap[definitionPath]))
-		memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-			column, ok := node.(*ast.ColumnDef)
-			if !ok || !strings.EqualFold(identName(column.Name), columnName) {
-				return true
-			}
-			matches = append(matches, protocol.Location{
-				URI:   protocol.DocumentURI("file://" + definitionPath),
-				Range: rangeByNode(lex, column.Type),
-			})
-			return true
-		})
-	}
+	matches := h.columnDefinitionMatches(columnName)
 	if len(matches) != 1 {
 		return []protocol.Location{}, nil
 	}
-	return matches, nil
+	return []protocol.Location{{
+		URI:   matches[0].URI,
+		Range: rangeByNode(matches[0].Lexer, matches[0].Column.Type),
+	}}, nil
 }
 
 func (h *Handler) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
@@ -909,53 +903,87 @@ func identName(ident *ast.Ident) string {
 	return ident.Name
 }
 
+type columnDefinitionMatch struct {
+	TableName string
+	Column    *ast.ColumnDef
+	URI       protocol.DocumentURI
+	Lexer     *memefish.Lexer
+}
+
+func (h *Handler) columnDefinitionMatches(name string) []columnDefinitionMatch {
+	result := []columnDefinitionMatch{}
+	for path, stmts := range h.parsedMap {
+		lex := newLexer(path, string(h.fileToContentMap[path]))
+		memewalk.InspectSlice(stmts, func(astPath []string, node ast.Node) bool {
+			table, ok := node.(*ast.CreateTable)
+			if !ok {
+				return true
+			}
+			for _, column := range table.Columns {
+				if strings.EqualFold(identName(column.Name), name) {
+					result = append(result, columnDefinitionMatch{
+						TableName: pathName(table.Name),
+						Column:    column,
+						URI:       protocol.DocumentURI("file://" + path),
+						Lexer:     lex,
+					})
+				}
+			}
+			return false
+		})
+	}
+	return result
+}
+
+func (h *Handler) createTableMatches(name string) []*ast.CreateTable {
+	result := []*ast.CreateTable{}
+	for _, stmts := range h.parsedMap {
+		memewalk.InspectSlice(stmts, func(astPath []string, node ast.Node) bool {
+			table, ok := node.(*ast.CreateTable)
+			if ok && strings.EqualFold(pathName(table.Name), name) {
+				result = append(result, table)
+			}
+			return true
+		})
+	}
+	return result
+}
+
 func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error) {
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
-	posParam := params.TextDocumentPositionParams
-	Path := posParam.TextDocument.URI.Path()
-
-	pos := posParam.Position
-
-	lex := newLexer(Path, string(h.fileToContentMap[Path]))
-
-	stmts := h.parsedMap[Path]
-
-	path := findNodesByPos(h.logger, lex, stmts, pos)
-
-	if len(path) == 0 {
-		return &protocol.Hover{}, nil
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	lex := newLexer(path, text)
+	if tableSymbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position); ok {
+		matches := h.createTableMatches(tableSymbol.Name)
+		if len(matches) == 1 {
+			return &protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.Markdown,
+					Value: "**Table** `" + tableSymbol.Name + "`\n\n```sql\n" + matches[0].SQL() + "\n```",
+				},
+				Range: tableSymbol.Range,
+			}, nil
+		}
 	}
 
-	var buf strings.Builder
-	for i := range path {
-		fmt.Fprintf(&buf, "- `%v`: `%T`\n", strings.Join(lo.Map(path[:i+1], func(item pathElem, _ int) string {
-			return item.Accessor
-		}), ""), path[i].Node)
-	}
-
-	deepestElem, ok := lo.Last(path)
+	columnName, columnRange, ok := identifierAtPositionWithRange(path, text, params.Position)
 	if !ok {
-		return &protocol.Hover{}, nil
+		return nil, nil
 	}
-
-	position := positionByNode(lex, deepestElem.Node)
+	matches := h.columnDefinitionMatches(columnName)
+	if len(matches) != 1 {
+		return nil, nil
+	}
+	match := matches[0]
 	return &protocol.Hover{
 		Contents: protocol.MarkupContent{
 			Kind:  protocol.Markdown,
-			Value: buf.String(),
+			Value: "**Column** `" + match.TableName + "." + columnName + "`\n\n```sql\n" + match.Column.SQL() + "\n```",
 		},
-		Range: protocol.Range{
-			Start: protocol.Position{
-				Line:      uint32(position.Line),
-				Character: uint32(position.Column),
-			},
-			End: protocol.Position{
-				Line:      uint32(position.EndLine),
-				Character: uint32(position.EndColumn),
-			},
-		},
+		Range: columnRange,
 	}, nil
 }
 
