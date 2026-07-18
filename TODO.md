@@ -41,7 +41,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [x] Workspace folder changes: add and remove indexed roots from `workspace/didChangeWorkspaceFolders`.
 - [x] Workspace file events: update the index when SQL files are created, changed, renamed, or deleted.
 - [x] Pull document diagnostics: return full/unchanged memefish parse reports while retaining publish diagnostics.
-- [ ] Workspace diagnostics: add after workspace files are indexed beyond open documents.
+- [x] Workspace diagnostics: return full and unchanged parse reports for tracked documents.
 
 ## Not Planned For Now
 

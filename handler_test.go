@@ -876,6 +876,47 @@ func TestDidChangeWorkspaceFoldersUpdatesIndex(t *testing.T) {
 	}
 }
 
+func TestDiagnosticWorkspaceReturnsFullAndUnchangedReports(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "invalid.sql")
+	if err := os.WriteFile(path, []byte("SELECT FROM"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(slog.Default(), nil)
+	if err := h.indexWorkspaceFolder(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+
+	fullReport, err := h.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fullReport.Items) != 1 {
+		t.Fatalf("DiagnosticWorkspace() returned %d items, want 1", len(fullReport.Items))
+	}
+	full, ok := fullReport.Items[0].Value.(protocol.WorkspaceFullDocumentDiagnosticReport)
+	if !ok {
+		t.Fatalf("DiagnosticWorkspace() item = %T, want full report", fullReport.Items[0].Value)
+	}
+	if full.URI != protocol.URIFromPath(path) || full.ResultID == "" || len(full.Items) == 0 {
+		t.Fatalf("DiagnosticWorkspace() full report = %#v", full)
+	}
+
+	unchangedReport, err := h.DiagnosticWorkspace(context.Background(), &protocol.WorkspaceDiagnosticParams{
+		PreviousResultIds: []protocol.PreviousResultID{{URI: full.URI, Value: full.ResultID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unchanged, ok := unchangedReport.Items[0].Value.(protocol.WorkspaceUnchangedDocumentDiagnosticReport)
+	if !ok {
+		t.Fatalf("DiagnosticWorkspace() item = %T, want unchanged report", unchangedReport.Items[0].Value)
+	}
+	if unchanged.URI != full.URI || unchanged.ResultID != full.ResultID {
+		t.Fatalf("DiagnosticWorkspace() unchanged report = %#v, want result ID %q", unchanged, full.ResultID)
+	}
+}
+
 func TestReferencesReturnsLocalTableReferences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"

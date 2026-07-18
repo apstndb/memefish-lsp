@@ -1785,6 +1785,60 @@ func (h *Handler) Diagnostic(ctx context.Context, params *protocol.DocumentDiagn
 	}}, nil
 }
 
+func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.WorkspaceDiagnosticParams) (*protocol.WorkspaceDiagnosticReport, error) {
+	previous := make(map[protocol.DocumentURI]string, len(params.PreviousResultIds))
+	for _, result := range params.PreviousResultIds {
+		previous[result.URI] = result.Value
+	}
+
+	h.fileContentMu.Lock()
+	contents := make(map[string]string, len(h.fileToContentMap))
+	for path, content := range h.fileToContentMap {
+		contents[path] = string(content)
+	}
+	h.fileContentMu.Unlock()
+
+	paths := make([]string, 0, len(contents))
+	for path := range contents {
+		paths = append(paths, path)
+	}
+	slices.Sort(paths)
+
+	report := &protocol.WorkspaceDiagnosticReport{
+		Items: make([]protocol.WorkspaceDocumentDiagnosticReport, 0, len(paths)),
+	}
+	for _, path := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		text := contents[path]
+		resultID := fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
+		uri := protocol.URIFromPath(path)
+		if previous[uri] == resultID {
+			report.Items = append(report.Items, protocol.WorkspaceDocumentDiagnosticReport{Value: protocol.WorkspaceUnchangedDocumentDiagnosticReport{
+				URI:     uri,
+				Version: 0,
+				UnchangedDocumentDiagnosticReport: protocol.UnchangedDocumentDiagnosticReport{
+					Kind:     string(protocol.DiagnosticUnchanged),
+					ResultID: resultID,
+				},
+			}})
+			continue
+		}
+		_, err := memefish.ParseStatements(path, text)
+		report.Items = append(report.Items, protocol.WorkspaceDocumentDiagnosticReport{Value: protocol.WorkspaceFullDocumentDiagnosticReport{
+			URI:     uri,
+			Version: 0,
+			FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
+				Kind:     string(protocol.DiagnosticFull),
+				ResultID: resultID,
+				Items:    diagnosticsFromParseError(err),
+			},
+		}})
+	}
+	return report, nil
+}
+
 func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error) {
 	if err := h.clearDiagnostics(ctx, params.TextDocument.URI); err != nil {
 		return err
@@ -2227,7 +2281,7 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_diagnosticProvider{Value: protocol.DiagnosticOptions{
 					Identifier:            "memefish",
 					InterFileDependencies: false,
-					WorkspaceDiagnostics:  false,
+					WorkspaceDiagnostics:  AssertInterface[lspabst.CanDiagnosticWorkspace](h),
 				}}, nil),
 			ImplementationProvider: lo.Ternary(AssertInterface[lspabst.CanImplementation](h),
 				&protocol.Or_ServerCapabilities_implementationProvider{Value: true}, nil),
