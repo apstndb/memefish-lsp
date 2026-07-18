@@ -42,6 +42,7 @@ var _ interface {
 	lspabst.CanReferences
 	lspabst.CanRename
 	lspabst.CanSemanticTokensFull
+	lspabst.CanSignatureHelp
 	lspabst.CanHover
 	lspabst.CanInlayHint
 	lspabst.TextDocumentSyncCapability
@@ -500,8 +501,167 @@ func (h *Handler) Client() (protocol.Client, error) {
 	return nil, errors.New("client is not initialized")
 }
 
-func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
-	return nil, nil
+type functionSignature struct {
+	Label      string
+	Parameters []string
+	Summary    string
+}
+
+var googleSQLSignatures = map[string]functionSignature{
+	"IF": {
+		Label:      "IF(expr, true_result, else_result)",
+		Parameters: []string{"expr", "true_result", "else_result"},
+		Summary:    "Returns true_result when expr is TRUE, otherwise else_result.",
+	},
+	"IFNULL": {
+		Label:      "IFNULL(expr, null_result)",
+		Parameters: []string{"expr", "null_result"},
+		Summary:    "Returns null_result when expr is NULL, otherwise expr.",
+	},
+	"NULLIF": {
+		Label:      "NULLIF(expr, expr_to_match)",
+		Parameters: []string{"expr", "expr_to_match"},
+		Summary:    "Returns NULL when the expressions are equal, otherwise expr.",
+	},
+	"COALESCE": {
+		Label:      "COALESCE(expr[, ...])",
+		Parameters: []string{"expr", "..."},
+		Summary:    "Returns the first non-NULL expression.",
+	},
+	"SUBSTR": {
+		Label:      "SUBSTR(value, position[, length])",
+		Parameters: []string{"value", "position", "length"},
+		Summary:    "Returns a substring of a STRING or BYTES value.",
+	},
+	"SUBSTRING": {
+		Label:      "SUBSTRING(value, position[, length])",
+		Parameters: []string{"value", "position", "length"},
+		Summary:    "Alias for SUBSTR.",
+	},
+	"SPLIT": {
+		Label:      "SPLIT(value[, delimiter])",
+		Parameters: []string{"value", "delimiter"},
+		Summary:    "Splits a STRING or BYTES value using a delimiter.",
+	},
+	"REPLACE": {
+		Label:      "REPLACE(original_value, from_pattern, to_pattern)",
+		Parameters: []string{"original_value", "from_pattern", "to_pattern"},
+		Summary:    "Replaces occurrences of from_pattern with to_pattern.",
+	},
+	"STARTS_WITH": {
+		Label:      "STARTS_WITH(value, prefix)",
+		Parameters: []string{"value", "prefix"},
+		Summary:    "Returns whether value starts with prefix.",
+	},
+	"STRPOS": {
+		Label:      "STRPOS(value, subvalue)",
+		Parameters: []string{"value", "subvalue"},
+		Summary:    "Returns the 1-based position of subvalue in value.",
+	},
+	"LOWER": {
+		Label:      "LOWER(value)",
+		Parameters: []string{"value"},
+		Summary:    "Returns value with alphabetic characters in lowercase.",
+	},
+	"UPPER": {
+		Label:      "UPPER(value)",
+		Parameters: []string{"value"},
+		Summary:    "Returns value with alphabetic characters in uppercase.",
+	},
+	"COUNT": {
+		Label:      "COUNT([DISTINCT] expression)",
+		Parameters: []string{"expression"},
+		Summary:    "Returns the number of input rows or non-NULL expression values.",
+	},
+	"COUNTIF": {
+		Label:      "COUNTIF(expression)",
+		Parameters: []string{"expression"},
+		Summary:    "Returns the number of TRUE expression values.",
+	},
+	"SUM": {
+		Label:      "SUM(expression)",
+		Parameters: []string{"expression"},
+		Summary:    "Returns the sum of non-NULL values.",
+	},
+	"AVG": {
+		Label:      "AVG(expression)",
+		Parameters: []string{"expression"},
+		Summary:    "Returns the average of non-NULL values.",
+	},
+	"MIN": {
+		Label:      "MIN(expression)",
+		Parameters: []string{"expression"},
+		Summary:    "Returns the minimum non-NULL value.",
+	},
+	"MAX": {
+		Label:      "MAX(expression)",
+		Parameters: []string{"expression"},
+		Summary:    "Returns the maximum non-NULL value.",
+	},
+}
+
+func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (*protocol.SignatureHelp, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	name, activeParameter, ok := activeFunctionCall(path, string(h.fileToContentMap[path]), params.Position)
+	if !ok {
+		return nil, nil
+	}
+	signature, ok := googleSQLSignatures[name]
+	if !ok {
+		return nil, nil
+	}
+	parameters := make([]protocol.ParameterInformation, 0, len(signature.Parameters))
+	for _, parameter := range signature.Parameters {
+		parameters = append(parameters, protocol.ParameterInformation{Label: parameter})
+	}
+	if len(parameters) > 0 && activeParameter >= uint32(len(parameters)) {
+		activeParameter = uint32(len(parameters) - 1)
+	}
+	return &protocol.SignatureHelp{
+		Signatures: []protocol.SignatureInformation{{
+			Label:         signature.Label,
+			Documentation: &protocol.Or_SignatureInformation_documentation{Value: signature.Summary},
+			Parameters:    parameters,
+		}},
+		ActiveParameter: &activeParameter,
+	}, nil
+}
+
+func activeFunctionCall(path, text string, pos protocol.Position) (string, uint32, bool) {
+	type callFrame struct {
+		name            string
+		activeParameter uint32
+	}
+
+	lex := newLexer(path, text)
+	frames := []callFrame{}
+	var previous token.Token
+	for tok, err := range gsqlutils.LexerSeq(lex) {
+		if err != nil || comparePosition(positionByPos(lex, tok.Pos), pos) >= 0 {
+			break
+		}
+		switch tok.Kind {
+		case "(":
+			frames = append(frames, callFrame{name: strings.ToUpper(strings.Trim(previous.Raw, "`"))})
+		case ",":
+			if len(frames) > 0 {
+				frames[len(frames)-1].activeParameter++
+			}
+		case ")":
+			if len(frames) > 0 {
+				frames = frames[:len(frames)-1]
+			}
+		}
+		previous = tok
+	}
+	if len(frames) == 0 || frames[len(frames)-1].name == "" {
+		return "", 0, false
+	}
+	frame := frames[len(frames)-1]
+	return frame.name, frame.activeParameter, true
 }
 
 func (h *Handler) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
@@ -1493,6 +1653,11 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_foldingRangeProvider{Value: true}, nil),
 			HoverProvider: lo.Ternary(AssertInterface[lspabst.CanHover](h),
 				&protocol.Or_ServerCapabilities_hoverProvider{Value: true}, nil),
+			SignatureHelpProvider: lo.Ternary(AssertInterface[lspabst.CanSignatureHelp](h),
+				&protocol.SignatureHelpOptions{
+					TriggerCharacters:   []string{"(", ","},
+					RetriggerCharacters: []string{","},
+				}, nil),
 			CompletionProvider: lo.Ternary(AssertInterface[lspabst.CanCompletion](h),
 				&protocol.CompletionOptions{TriggerCharacters: []string{" ", ".", "_"}}, nil),
 			DefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanDefinition](h),

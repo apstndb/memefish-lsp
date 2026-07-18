@@ -45,6 +45,72 @@ func TestCompletionItemsIncludesGoogleSQLKeywordsAndDocumentIdentifiers(t *testi
 	}
 }
 
+func TestSignatureHelpTracksActiveParameter(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT IF(TRUE, 1, "
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     protocol.Position{Character: uint32(len(text))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got.Signatures) != 1 || got.Signatures[0].Label != "IF(expr, true_result, else_result)" {
+		t.Fatalf("SignatureHelp() = %#v, want IF signature", got)
+	}
+	if got.ActiveParameter == nil || *got.ActiveParameter != 2 {
+		t.Fatalf("SignatureHelp() active parameter = %#v, want 2", got.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpUsesInnermostFunctionCall(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT IF(TRUE, SUBSTR(name, "
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     protocol.Position{Character: uint32(len(text))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Signatures[0].Label != "SUBSTR(value, position[, length])" {
+		t.Fatalf("SignatureHelp() = %#v, want nested SUBSTR signature", got)
+	}
+	if got.ActiveParameter == nil || *got.ActiveParameter != 1 {
+		t.Fatalf("SignatureHelp() active parameter = %#v, want 1", got.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpIgnoresUnknownFunction(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT CUSTOM_FUNCTION("
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     protocol.Position{Character: uint32(len(text))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("SignatureHelp() = %#v, want nil for unknown function", got)
+	}
+}
+
 func TestCompletionPrefixAt(t *testing.T) {
 	got := completionPrefixAt("SELECT singer_id", protocol.Position{Line: 0, Character: 9})
 	if got != "si" {
