@@ -1019,6 +1019,23 @@ func TestCodeLensOpensFirstLocalTableReference(t *testing.T) {
 	}
 }
 
+func TestCodeLensCountsWorkspaceTableReferences(t *testing.T) {
+	const path = "/schema.sql"
+	h := newParsedTestHandler(t, path, "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/query.sql", "SELECT * FROM Singers")
+	addParsedTestDocument(t, h, "/second_query.sql", "SELECT SingerId FROM Singers")
+
+	lenses, err := h.CodeLens(context.Background(), &protocol.CodeLensParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///schema.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lenses) != 1 || lenses[0].Command == nil || lenses[0].Command.Title != "2 references" {
+		t.Fatalf("CodeLens() = %#v, want two workspace references", lenses)
+	}
+}
+
 func TestPrepareRenameReturnsLocalTableName(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"

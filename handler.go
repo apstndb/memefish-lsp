@@ -1170,6 +1170,20 @@ func tableReferenceLocations(uri protocol.DocumentURI, lex *memefish.Lexer, stmt
 	return result
 }
 
+func (h *Handler) workspaceTableReferenceLocations(target string) []protocol.Location {
+	result := []protocol.Location{}
+	for path, stmts := range h.parsedMap {
+		result = append(result, tableReferenceLocations(
+			protocol.URIFromPath(path),
+			newLexer(path, string(h.fileToContentMap[path])),
+			stmts,
+			target,
+		)...)
+	}
+	slices.SortFunc(result, compareLocations)
+	return result
+}
+
 func (h *Handler) CodeLens(_ context.Context, params *protocol.CodeLensParams) ([]protocol.CodeLens, error) {
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
@@ -1184,7 +1198,7 @@ func (h *Handler) CodeLens(_ context.Context, params *protocol.CodeLensParams) (
 		if !ok || !isSimplePath(table.Name) {
 			return true
 		}
-		references := tableReferenceLocations(uri, lex, stmts, pathName(table.Name))
+		references := h.workspaceTableReferenceLocations(pathName(table.Name))
 		if len(references) == 0 {
 			return false
 		}
