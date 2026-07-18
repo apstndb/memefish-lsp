@@ -1067,13 +1067,7 @@ func (h *Handler) tableDefinitionLocations(target string) []protocol.Location {
 			}
 		}
 	}
-	slices.SortFunc(result, func(a, b protocol.Location) int {
-		return cmp.Or(
-			strings.Compare(string(a.URI), string(b.URI)),
-			cmp.Compare(a.Range.Start.Line, b.Range.Start.Line),
-			cmp.Compare(a.Range.Start.Character, b.Range.Start.Character),
-		)
-	})
+	slices.SortFunc(result, compareLocations)
 	return result
 }
 
@@ -1121,8 +1115,7 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
-	uri := params.TextDocument.URI
-	path := uri.Path()
+	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
 	lex := newLexer(path, text)
 	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
@@ -1130,30 +1123,33 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 		return nil, nil
 	}
 
-	defs := tableDefinitions(h.parsedMap[path])
-	if _, ok := defs[strings.ToUpper(target)]; !ok {
+	if len(h.tableDefinitionLocations(target)) == 0 {
 		return nil, nil
 	}
 
-	var result []protocol.Location
-	memewalk.InspectSlice(h.parsedMap[path], func(path []string, node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.CreateTable:
-			if strings.EqualFold(pathName(n.Name), target) && params.Context.IncludeDeclaration {
-				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Name)})
-			}
-		case *ast.PathTableExpr:
-			if strings.EqualFold(pathName(n.Path), target) {
-				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Path)})
-			}
-		case *ast.TableName:
-			if strings.EqualFold(identName(n.Table), target) {
-				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Table)})
+	result := []protocol.Location{}
+	for candidatePath, stmts := range h.parsedMap {
+		candidateURI := protocol.URIFromPath(candidatePath)
+		candidateLexer := newLexer(candidatePath, string(h.fileToContentMap[candidatePath]))
+		if params.Context.IncludeDeclaration {
+			for _, def := range tableDefinitions(stmts) {
+				if strings.EqualFold(pathName(def.Name), target) {
+					result = append(result, protocol.Location{URI: candidateURI, Range: rangeByNode(candidateLexer, def.Name)})
+				}
 			}
 		}
-		return true
-	})
+		result = append(result, tableReferenceLocations(candidateURI, candidateLexer, stmts, target)...)
+	}
+	slices.SortFunc(result, compareLocations)
 	return result, nil
+}
+
+func compareLocations(a, b protocol.Location) int {
+	return cmp.Or(
+		strings.Compare(string(a.URI), string(b.URI)),
+		cmp.Compare(a.Range.Start.Line, b.Range.Start.Line),
+		cmp.Compare(a.Range.Start.Character, b.Range.Start.Character),
+	)
 }
 
 func tableReferenceLocations(uri protocol.DocumentURI, lex *memefish.Lexer, stmts []ast.Statement, target string) []protocol.Location {

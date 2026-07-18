@@ -962,6 +962,32 @@ func TestReferencesReturnsLocalTableReferences(t *testing.T) {
 	}
 }
 
+func TestReferencesReturnsWorkspaceTableReferences(t *testing.T) {
+	h := newParsedTestHandler(t, "/query.sql", "SELECT * FROM Singers")
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/second_query.sql", "SELECT SingerId FROM Singers")
+
+	got, err := h.References(context.Background(), &protocol.ReferenceParams{
+		Context: protocol.ReferenceContext{IncludeDeclaration: true},
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("References() = %#v, want declaration and two query references", got)
+	}
+	wantURIs := []protocol.DocumentURI{"file:///query.sql", "file:///schema.sql", "file:///second_query.sql"}
+	for i, want := range wantURIs {
+		if got[i].URI != want {
+			t.Fatalf("References()[%d].URI = %q, want %q", i, got[i].URI, want)
+		}
+	}
+}
+
 func TestCodeLensOpensFirstLocalTableReference(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"
