@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"unicode/utf16"
 
 	"github.com/cloudspannerecosystem/memefish"
 	"github.com/cloudspannerecosystem/memefish/ast"
@@ -45,6 +46,7 @@ var _ interface {
 	lspabst.TextDocumentSyncCapability
 	lspabst.CanDocumentSymbol
 	lspabst.CanFoldingRange
+	lspabst.CanFormatting
 	lspabst.CanSelectionRange
 	lspabst.CanSymbol
 	lspabst.CanTypeDefinition
@@ -499,6 +501,58 @@ func (h *Handler) Client() (protocol.Client, error) {
 
 func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
 	return nil, nil
+}
+
+func (h *Handler) Formatting(ctx context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	formatted, ok := formatGoogleSQL(path, text)
+	if !ok || formatted == text {
+		return []protocol.TextEdit{}, nil
+	}
+	return []protocol.TextEdit{{
+		Range: protocol.Range{
+			Start: protocol.Position{},
+			End:   documentEndPosition(text),
+		},
+		NewText: formatted,
+	}}, nil
+}
+
+func formatGoogleSQL(path, text string) (string, bool) {
+	if documentHasComments(path, text) {
+		return "", false
+	}
+	stmts, err := memefish.ParseStatements(path, text)
+	if err != nil || len(stmts) == 0 {
+		return "", false
+	}
+	formatted := strings.Join(lo.Map(stmts, func(stmt ast.Statement, _ int) string {
+		return stmt.SQL()
+	}), ";\n") + ";\n"
+	return formatted, true
+}
+
+func documentHasComments(path, text string) bool {
+	lex := newLexer(path, text)
+	for tok, err := range gsqlutils.LexerSeq(lex) {
+		if err != nil || len(tok.Comments) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func documentEndPosition(text string) protocol.Position {
+	lines := strings.Split(text, "\n")
+	lastLine := lines[len(lines)-1]
+	return protocol.Position{
+		Line:      uint32(len(lines) - 1),
+		Character: uint32(len(utf16.Encode([]rune(lastLine)))),
+	}
 }
 
 func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
@@ -1406,6 +1460,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_documentSymbolProvider{Value: true}, nil),
 			WorkspaceSymbolProvider: lo.Ternary(AssertInterface[lspabst.CanSymbol](h),
 				&protocol.Or_ServerCapabilities_workspaceSymbolProvider{Value: true}, nil),
+			DocumentFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanFormatting](h),
+				&protocol.Or_ServerCapabilities_documentFormattingProvider{Value: true}, nil),
 			SelectionRangeProvider: lo.Ternary(AssertInterface[lspabst.CanSelectionRange](h),
 				&protocol.Or_ServerCapabilities_selectionRangeProvider{Value: true}, nil),
 			// DefinitionProvider: true,

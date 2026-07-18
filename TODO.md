@@ -10,7 +10,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [x] `textDocument/documentHighlight`: highlight occurrences of the identifier under the cursor.
 - [x] `textDocument/definition`: jump from table references to local `CREATE TABLE` definitions.
 - [x] `textDocument/references`: find local `CREATE TABLE` declarations and table references.
-- [ ] `textDocument/formatting`: format parsed statements without destroying comments or intentional layout.
+- [x] `textDocument/formatting`: format valid comment-free documents without discarding comments.
 - [ ] `textDocument/rangeFormatting`: format a selected statement or expression range.
 - [ ] `textDocument/signatureHelp`: show function call signatures for common GoogleSQL functions.
 - [ ] `textDocument/codeAction`: quick fixes for parser diagnostics and existing inlay-hint edits.

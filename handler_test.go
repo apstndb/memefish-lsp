@@ -77,6 +77,63 @@ func TestDidSaveReparsesIncludedText(t *testing.T) {
 	}
 }
 
+func TestFormattingCanonicalizesCommentFreeDocument(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT  1;SELECT 2"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.Formatting(context.Background(), &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("Formatting() returned %d edits, want 1: %#v", len(got), got)
+	}
+	if got[0].NewText != "SELECT 1;\nSELECT 2;\n" {
+		t.Fatalf("Formatting() text = %q", got[0].NewText)
+	}
+	if got[0].Range.End.Line != 0 || got[0].Range.End.Character != uint32(len(text)) {
+		t.Fatalf("Formatting() range = %#v, want whole document", got[0].Range)
+	}
+}
+
+func TestFormattingPreservesCommentedDocument(t *testing.T) {
+	const path = "/test.sql"
+	const text = "-- keep this comment\nSELECT  1"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.Formatting(context.Background(), &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Formatting() returned edits for commented document: %#v", got)
+	}
+}
+
+func TestFormattingRejectsInvalidDocument(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT FROM"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.Formatting(context.Background(), &protocol.DocumentFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Formatting() returned edits for invalid document: %#v", got)
+	}
+}
+
 func TestDocumentHighlightHighlightsIdentifierOccurrences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT singer_id FROM Singers WHERE singer_id = 1"
