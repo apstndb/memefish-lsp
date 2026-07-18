@@ -31,6 +31,7 @@ var _ interface {
 	lspabst.CanInitialize
 	lspabst.CanDidOpen
 	lspabst.CanDidClose
+	lspabst.CanDidSave
 	lspabst.CanCompletion
 	lspabst.CanDefinition
 	lspabst.CanDocumentHighlight
@@ -1093,6 +1094,13 @@ func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDoc
 	return h.clearDiagnostics(ctx, params.TextDocument.URI)
 }
 
+func (h *Handler) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error {
+	if params.Text == nil {
+		return nil
+	}
+	return h.parse(ctx, params.TextDocument.URI, *params.Text)
+}
+
 func (h *Handler) clearDiagnostics(ctx context.Context, uri protocol.DocumentURI) error {
 	client, err := h.Client()
 	if err != nil {
@@ -1209,7 +1217,12 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 			Version: "v0.0.0-devel",
 		},
 		Capabilities: protocol.ServerCapabilities{
-			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h), protocol.Full, protocol.None),
+			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h),
+				&protocol.TextDocumentSyncOptions{
+					OpenClose: true,
+					Change:    protocol.Full,
+					Save:      &protocol.SaveOptions{IncludeText: AssertInterface[lspabst.CanDidSave](h)},
+				}, nil),
 			SemanticTokensProvider: map[string]any{
 				"legend": protocol.SemanticTokensLegend{
 					TokenTypes:     semanticTokens.TokenTypes,

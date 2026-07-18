@@ -26,7 +26,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 
 ## Low Value Or Client/Workspace Dependent
 
-- [ ] `textDocument/didSave`: accept save notifications if clients request them.
+- [x] `textDocument/didSave`: reparse included save contents and refresh diagnostics.
 - [ ] `completionItem/resolve`: add deferred docs/details after richer completion exists.
 - [ ] `codeAction/resolve`: add only after code actions are implemented.
 - [ ] `codeLens/resolve`: add only after code lenses are implemented.

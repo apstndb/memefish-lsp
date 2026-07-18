@@ -10,6 +10,16 @@ import (
 	"github.com/cloudspannerecosystem/memefish"
 )
 
+type recordingClient struct {
+	protocol.Client
+	diagnostics []*protocol.PublishDiagnosticsParams
+}
+
+func (c *recordingClient) PublishDiagnostics(_ context.Context, params *protocol.PublishDiagnosticsParams) error {
+	c.diagnostics = append(c.diagnostics, params)
+	return nil
+}
+
 func TestCompletionItemsIncludesGoogleSQLKeywordsAndDocumentIdentifiers(t *testing.T) {
 	keywordItems := completionItems("SELECT singer_id FROM Singers", "se")
 	keywordLabels := make([]string, 0, len(keywordItems))
@@ -38,6 +48,31 @@ func TestCompletionPrefixAt(t *testing.T) {
 	got := completionPrefixAt("SELECT singer_id", protocol.Position{Line: 0, Character: 9})
 	if got != "si" {
 		t.Fatalf("completionPrefixAt() = %q, want %q", got, "si")
+	}
+}
+
+func TestDidSaveReparsesIncludedText(t *testing.T) {
+	const path = "/test.sql"
+	text := "SELECT 1"
+	h := NewHandler(slog.Default(), nil)
+	client := &recordingClient{}
+	h.SetClient(client)
+
+	err := h.DidSave(context.Background(), &protocol.DidSaveTextDocumentParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: protocol.DocumentURI("file://" + path)},
+		Text:         &text,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.fileToContentMap[path]); got != text {
+		t.Fatalf("saved text = %q, want %q", got, text)
+	}
+	if len(h.parsedMap[path]) != 1 {
+		t.Fatalf("parsed statements = %d, want 1", len(h.parsedMap[path]))
+	}
+	if len(client.diagnostics) != 1 || len(client.diagnostics[0].Diagnostics) != 0 {
+		t.Fatalf("published diagnostics = %#v, want one empty update", client.diagnostics)
 	}
 }
 
