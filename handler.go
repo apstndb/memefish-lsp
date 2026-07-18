@@ -2046,17 +2046,23 @@ func (h *Handler) restoreWorkspaceFile(path string) {
 	if err != nil {
 		h.logger.Warn("failed to restore workspace file", slog.String("path", path), slog.Any("err", err))
 		h.fileContentMu.Lock()
+		defer h.fileContentMu.Unlock()
+		if _, open := h.openDocumentMap[path]; open {
+			return
+		}
 		delete(h.workspaceFileMap, path)
 		delete(h.fileToContentMap, path)
 		delete(h.parsedMap, path)
-		h.fileContentMu.Unlock()
 		return
 	}
 	parsed, _ := memefish.ParseStatements(path, string(content))
 	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+	if _, open := h.openDocumentMap[path]; open {
+		return
+	}
 	h.fileToContentMap[path] = content
 	h.parsedMap[path] = parsed
-	h.fileContentMu.Unlock()
 }
 
 func (h *Handler) indexWorkspaceFile(path string) {
@@ -2076,10 +2082,13 @@ func (h *Handler) indexWorkspaceFile(path string) {
 	}
 	parsed, _ := memefish.ParseStatements(path, string(content))
 	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+	if _, open := h.openDocumentMap[path]; open {
+		return
+	}
 	h.fileToContentMap[path] = content
 	h.parsedMap[path] = parsed
 	h.workspaceFileMap[path] = struct{}{}
-	h.fileContentMu.Unlock()
 }
 
 func (h *Handler) removeWorkspaceFile(path string) {
