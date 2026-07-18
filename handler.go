@@ -46,6 +46,7 @@ var _ interface {
 	lspabst.CanDocumentSymbol
 	lspabst.CanFoldingRange
 	lspabst.CanSelectionRange
+	lspabst.CanSymbol
 } = (*Handler)(nil)
 
 type Handler struct {
@@ -146,6 +147,97 @@ func (h *Handler) DocumentSymbol(ctx context.Context, params *protocol.DocumentS
 		return true
 	})
 	return result, nil
+}
+
+func (h *Handler) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	result := []protocol.SymbolInformation{}
+	for path, stmts := range h.parsedMap {
+		lex := newLexer(path, string(h.fileToContentMap[path]))
+		uri := protocol.DocumentURI("file://" + path)
+		result = append(result, workspaceSymbols(uri, lex, stmts, params.Query)...)
+	}
+	slices.SortFunc(result, func(a, b protocol.SymbolInformation) int {
+		return cmp.Or(
+			strings.Compare(strings.ToUpper(a.Name), strings.ToUpper(b.Name)),
+			strings.Compare(string(a.Location.URI), string(b.Location.URI)),
+			cmp.Compare(a.Location.Range.Start.Line, b.Location.Range.Start.Line),
+			cmp.Compare(a.Location.Range.Start.Character, b.Location.Range.Start.Character),
+		)
+	})
+	return result, nil
+}
+
+func workspaceSymbols(
+	uri protocol.DocumentURI,
+	lex *memefish.Lexer,
+	stmts []ast.Statement,
+	query string,
+) []protocol.SymbolInformation {
+	result := []protocol.SymbolInformation{}
+	add := func(name string, kind protocol.SymbolKind, node ast.Node, container string) {
+		if name == "" || !fuzzySymbolMatch(name, query) {
+			return
+		}
+		result = append(result, protocol.SymbolInformation{
+			Name:          name,
+			Kind:          kind,
+			ContainerName: container,
+			Location: protocol.Location{
+				URI:   uri,
+				Range: rangeByNode(lex, node),
+			},
+		})
+	}
+
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.CreateSchema:
+			add(identName(n.Name), protocol.Namespace, n.Name, "")
+		case *ast.CreateTable:
+			tableName := pathName(n.Name)
+			add(tableName, protocol.Struct, n.Name, "")
+			for _, column := range n.Columns {
+				add(identName(column.Name), protocol.Field, column.Name, tableName)
+			}
+		case *ast.CreateSequence:
+			add(pathName(n.Name), protocol.Object, n.Name, "")
+		case *ast.CreateView:
+			add(pathName(n.Name), protocol.Object, n.Name, "")
+		case *ast.CreateIndex:
+			add(pathName(n.Name), protocol.Key, n.Name, pathName(n.TableName))
+		case *ast.CreateVectorIndex:
+			add(identName(n.Name), protocol.Key, n.Name, identName(n.TableName))
+		case *ast.CreateChangeStream:
+			add(identName(n.Name), protocol.Event, n.Name, "")
+		case *ast.CreateModel:
+			add(identName(n.Name), protocol.Class, n.Name, "")
+		case *ast.CreateSearchIndex:
+			add(pathName(n.Name), protocol.Key, n.Name, pathName(n.TableName))
+		}
+		return true
+	})
+	return result
+}
+
+func fuzzySymbolMatch(name, query string) bool {
+	if query == "" {
+		return true
+	}
+	nameRunes := []rune(strings.ToUpper(name))
+	queryRunes := []rune(strings.ToUpper(query))
+	queryIndex := 0
+	for _, r := range nameRunes {
+		if r == queryRunes[queryIndex] {
+			queryIndex++
+			if queryIndex == len(queryRunes) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func extractColumnName(query ast.QueryExpr) ([]string, bool) {
@@ -1250,6 +1342,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_inlayHintProvider{Value: true}, nil),
 			DocumentSymbolProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentSymbol](h),
 				&protocol.Or_ServerCapabilities_documentSymbolProvider{Value: true}, nil),
+			WorkspaceSymbolProvider: lo.Ternary(AssertInterface[lspabst.CanSymbol](h),
+				&protocol.Or_ServerCapabilities_workspaceSymbolProvider{Value: true}, nil),
 			SelectionRangeProvider: lo.Ternary(AssertInterface[lspabst.CanSelectionRange](h),
 				&protocol.Or_ServerCapabilities_selectionRangeProvider{Value: true}, nil),
 			// DefinitionProvider: true,

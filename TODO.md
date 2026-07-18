@@ -30,7 +30,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [ ] `completionItem/resolve`: add deferred docs/details after richer completion exists.
 - [ ] `codeAction/resolve`: add only after code actions are implemented.
 - [ ] `codeLens/resolve`: add only after code lenses are implemented.
-- [ ] `workspace/symbol`: expose schema objects across open documents or workspace files.
+- [x] `workspace/symbol`: expose schema objects across parsed open documents.
 - [ ] Workspace file events and workspace folders: useful after multi-file schema indexing exists.
 - [ ] Pull/workspace diagnostics: keep publish diagnostics until there is a workspace index.
 

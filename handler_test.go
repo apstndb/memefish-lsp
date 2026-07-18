@@ -140,6 +140,28 @@ func TestImplementationReturnsLocalCreateTableLocation(t *testing.T) {
 	}
 }
 
+func TestSymbolReturnsFuzzyMatchedSchemaSymbolsAcrossOpenDocuments(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, "/singers.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/albums.sql", "CREATE TABLE Albums (AlbumId INT64) PRIMARY KEY (AlbumId)")
+
+	got, err := h.Symbol(context.Background(), &protocol.WorkspaceSymbolParams{Query: "alb"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Symbol() returned %d symbols, want table and column: %#v", len(got), got)
+	}
+	if got[0].Name != "AlbumId" || got[1].Name != "Albums" {
+		t.Fatalf("Symbol() names = %q, %q, want AlbumId and Albums", got[0].Name, got[1].Name)
+	}
+	for _, symbol := range got {
+		if symbol.Location.URI != "file:///albums.sql" {
+			t.Fatalf("Symbol() URI = %q, want albums document", symbol.Location.URI)
+		}
+	}
+}
+
 func TestReferencesReturnsLocalTableReferences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"
@@ -222,14 +244,19 @@ func TestRenameReturnsWorkspaceEditForLocalTableReferences(t *testing.T) {
 
 func newParsedTestHandler(t *testing.T, path, text string) *Handler {
 	t.Helper()
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, path, text)
+	return h
+}
+
+func addParsedTestDocument(t *testing.T, h *Handler, path, text string) {
+	t.Helper()
 
 	parsed, err := memefish.ParseStatements(path, text)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	h := NewHandler(slog.Default(), nil)
 	h.fileToContentMap[path] = []byte(text)
 	h.parsedMap[path] = parsed
-	return h
 }
