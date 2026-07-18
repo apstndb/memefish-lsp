@@ -1239,7 +1239,7 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 	if !ok {
 		return nil, nil
 	}
-	if _, ok := tableDefinitions(h.parsedMap[path])[strings.ToUpper(symbol.Name)]; !ok {
+	if len(h.tableDefinitionLocations(symbol.Name)) != 1 {
 		return nil, nil
 	}
 
@@ -1265,19 +1265,27 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 	if !ok {
 		return nil, nil
 	}
-	if _, ok := tableDefinitions(h.parsedMap[path])[strings.ToUpper(symbol.Name)]; !ok {
+	if len(h.tableDefinitionLocations(symbol.Name)) != 1 {
 		return nil, nil
 	}
+	if !strings.EqualFold(symbol.Name, params.NewName) && len(h.tableDefinitionLocations(params.NewName)) != 0 {
+		return nil, fmt.Errorf("table %q already exists", params.NewName)
+	}
 
-	edits := simpleTableRenameEdits(lex, h.parsedMap[path], symbol.Name, params.NewName)
-	if len(edits) == 0 {
+	changes := make(map[protocol.DocumentURI][]protocol.TextEdit)
+	for candidatePath, stmts := range h.parsedMap {
+		candidateLexer := newLexer(candidatePath, string(h.fileToContentMap[candidatePath]))
+		edits := simpleTableRenameEdits(candidateLexer, stmts, symbol.Name, params.NewName)
+		if len(edits) != 0 {
+			changes[protocol.URIFromPath(candidatePath)] = edits
+		}
+	}
+	if len(changes) == 0 {
 		return nil, nil
 	}
 
 	return &protocol.WorkspaceEdit{
-		Changes: map[protocol.DocumentURI][]protocol.TextEdit{
-			uri: edits,
-		},
+		Changes: changes,
 	}, nil
 }
 

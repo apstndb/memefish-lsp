@@ -1079,6 +1079,31 @@ func TestRenameReturnsWorkspaceEditForLocalTableReferences(t *testing.T) {
 	}
 }
 
+func TestRenameReturnsWorkspaceEditAcrossDocuments(t *testing.T) {
+	h := newParsedTestHandler(t, "/query.sql", "SELECT * FROM Singers")
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+
+	got, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Character: 16},
+		},
+		NewName: "Artists",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got.Changes) != 2 {
+		t.Fatalf("Rename() = %#v, want edits in query and schema documents", got)
+	}
+	for _, uri := range []protocol.DocumentURI{"file:///query.sql", "file:///schema.sql"} {
+		edits := got.Changes[uri]
+		if len(edits) != 1 || edits[0].NewText != "Artists" {
+			t.Fatalf("Rename() edits for %s = %#v, want one Artists edit", uri, edits)
+		}
+	}
+}
+
 func TestLinkedEditingRangeReturnsMatchingLocalTableRanges(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"
