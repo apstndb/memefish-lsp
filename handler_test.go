@@ -286,6 +286,52 @@ func TestDocumentHighlightHighlightsIdentifierOccurrences(t *testing.T) {
 	}
 }
 
+func TestCodeActionReturnsInsertASQuickFix(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT SingerId singer FROM Singers"
+	h := newParsedTestHandler(t, path, text)
+
+	got, err := h.CodeAction(context.Background(), &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Range: protocol.Range{
+			Start: protocol.Position{Character: 16},
+			End:   protocol.Position{Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("CodeAction() returned %d actions, want 1: %#v", len(got), got)
+	}
+	if got[0].Title != "Insert AS keyword" || got[0].Kind != protocol.QuickFix || !got[0].IsPreferred {
+		t.Fatalf("CodeAction() = %#v, want preferred AS quick fix", got[0])
+	}
+	edits := got[0].Edit.Changes["file:///test.sql"]
+	if len(edits) != 1 || edits[0].NewText != "AS " {
+		t.Fatalf("CodeAction() edits = %#v, want AS insertion", edits)
+	}
+}
+
+func TestCodeActionHonorsRequestedKinds(t *testing.T) {
+	h := newParsedTestHandler(t, "/test.sql", "SELECT SingerId singer FROM Singers")
+
+	got, err := h.CodeAction(context.Background(), &protocol.CodeActionParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Range: protocol.Range{
+			Start: protocol.Position{Character: 16},
+			End:   protocol.Position{Character: 16},
+		},
+		Context: protocol.CodeActionContext{Only: []protocol.CodeActionKind{protocol.Source}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("CodeAction() returned actions for source-only request: %#v", got)
+	}
+}
+
 func TestDefinitionReturnsLocalCreateTableLocation(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"

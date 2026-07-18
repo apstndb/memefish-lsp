@@ -34,6 +34,7 @@ var _ interface {
 	lspabst.CanDidClose
 	lspabst.CanDidSave
 	lspabst.CanCompletion
+	lspabst.CanCodeAction
 	lspabst.CanDefinition
 	lspabst.CanDocumentHighlight
 	lspabst.CanImplementation
@@ -429,6 +430,54 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 	return result, nil
 }
 
+func (h *Handler) CodeAction(ctx context.Context, params *protocol.CodeActionParams) ([]protocol.CodeAction, error) {
+	if !codeActionKindRequested(params.Context.Only, protocol.QuickFix) {
+		return []protocol.CodeAction{}, nil
+	}
+
+	hints, err := h.InlayHint(ctx, &protocol.InlayHintParams{
+		TextDocument: params.TextDocument,
+		Range:        params.Range,
+	})
+	if err != nil {
+		return nil, err
+	}
+	uri := params.TextDocument.URI
+	result := []protocol.CodeAction{}
+	for _, hint := range hints {
+		for _, edit := range hint.TextEdits {
+			if !rangeIncludesPosition(params.Range, edit.Range.Start) {
+				continue
+			}
+			title := "Apply suggested syntax"
+			if edit.NewText == "AS " {
+				title = "Insert AS keyword"
+			}
+			result = append(result, protocol.CodeAction{
+				Title:       title,
+				Kind:        protocol.QuickFix,
+				IsPreferred: true,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{uri: {edit}},
+				},
+			})
+		}
+	}
+	return result, nil
+}
+
+func codeActionKindRequested(only []protocol.CodeActionKind, kind protocol.CodeActionKind) bool {
+	if len(only) == 0 {
+		return true
+	}
+	for _, requested := range only {
+		if requested == kind || strings.HasPrefix(string(kind), string(requested)+".") {
+			return true
+		}
+	}
+	return false
+}
+
 func generateInlayHintForSelectItems(lex *memefish.Lexer, query ast.QueryExpr, columnNames []string) []protocol.InlayHint {
 	var result []protocol.InlayHint
 	if sq, ok := query.(*ast.SubQuery); ok {
@@ -749,6 +798,10 @@ func rangeHasComments(path, text string, target protocol.Range) bool {
 
 func rangeContains(outer, inner protocol.Range) bool {
 	return comparePosition(outer.Start, inner.Start) <= 0 && comparePosition(inner.End, outer.End) <= 0
+}
+
+func rangeIncludesPosition(r protocol.Range, pos protocol.Position) bool {
+	return comparePosition(r.Start, pos) <= 0 && comparePosition(pos, r.End) <= 0
 }
 
 func rangesOverlap(a, b protocol.Range) bool {
@@ -1668,6 +1721,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_typeDefinitionProvider{Value: true}, nil),
 			DocumentHighlightProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentHighlight](h),
 				&protocol.Or_ServerCapabilities_documentHighlightProvider{Value: true}, nil),
+			CodeActionProvider: lo.Ternary(AssertInterface[lspabst.CanCodeAction](h),
+				&protocol.CodeActionOptions{CodeActionKinds: []protocol.CodeActionKind{protocol.QuickFix}}, nil),
 			ReferencesProvider: lo.Ternary(AssertInterface[lspabst.CanReferences](h),
 				&protocol.Or_ServerCapabilities_referencesProvider{Value: true}, nil),
 			RenameProvider: lo.Ternary(AssertInterface[lspabst.CanRename](h),
