@@ -134,6 +134,72 @@ func TestFormattingRejectsInvalidDocument(t *testing.T) {
 	}
 }
 
+func TestRangeFormattingFormatsFullySelectedStatement(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT  1;\nSELECT  2"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.RangeFormatting(context.Background(), &protocol.DocumentRangeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 1},
+			End:   protocol.Position{Line: 1, Character: 9},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("RangeFormatting() returned %d edits, want 1: %#v", len(got), got)
+	}
+	if got[0].NewText != "SELECT 2" || got[0].Range.Start.Line != 1 {
+		t.Fatalf("RangeFormatting() edit = %#v, want formatted second statement", got[0])
+	}
+}
+
+func TestRangeFormattingRejectsPartialStatement(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT  1"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.RangeFormatting(context.Background(), &protocol.DocumentRangeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 1},
+			End:   protocol.Position{Line: 0, Character: 9},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("RangeFormatting() returned edits for partial statement: %#v", got)
+	}
+}
+
+func TestRangeFormattingPreservesCommentsInSelection(t *testing.T) {
+	const path = "/test.sql"
+	const text = "-- keep this comment\nSELECT  1"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.RangeFormatting(context.Background(), &protocol.DocumentRangeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Range: protocol.Range{
+			Start: protocol.Position{},
+			End:   protocol.Position{Line: 1, Character: 9},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("RangeFormatting() returned edits for commented selection: %#v", got)
+	}
+}
+
 func TestDocumentHighlightHighlightsIdentifierOccurrences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT singer_id FROM Singers WHERE singer_id = 1"

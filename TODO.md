@@ -11,7 +11,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [x] `textDocument/definition`: jump from table references to local `CREATE TABLE` definitions.
 - [x] `textDocument/references`: find local `CREATE TABLE` declarations and table references.
 - [x] `textDocument/formatting`: format valid comment-free documents without discarding comments.
-- [ ] `textDocument/rangeFormatting`: format a selected statement or expression range.
+- [x] `textDocument/rangeFormatting`: format complete comment-free statements inside a selection.
 - [ ] `textDocument/signatureHelp`: show function call signatures for common GoogleSQL functions.
 - [ ] `textDocument/codeAction`: quick fixes for parser diagnostics and existing inlay-hint edits.
 

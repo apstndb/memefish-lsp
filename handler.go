@@ -38,6 +38,7 @@ var _ interface {
 	lspabst.CanDocumentHighlight
 	lspabst.CanImplementation
 	lspabst.CanPrepareRename
+	lspabst.CanRangeFormatting
 	lspabst.CanReferences
 	lspabst.CanRename
 	lspabst.CanSemanticTokensFull
@@ -522,6 +523,31 @@ func (h *Handler) Formatting(ctx context.Context, params *protocol.DocumentForma
 	}}, nil
 }
 
+func (h *Handler) RangeFormatting(ctx context.Context, params *protocol.DocumentRangeFormattingParams) ([]protocol.TextEdit, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	if rangeHasComments(path, text, params.Range) {
+		return []protocol.TextEdit{}, nil
+	}
+	stmts, err := memefish.ParseStatements(path, text)
+	if err != nil {
+		return []protocol.TextEdit{}, nil
+	}
+	lex := newLexer(path, text)
+	edits := []protocol.TextEdit{}
+	for _, stmt := range stmts {
+		stmtRange := rangeByNode(lex, stmt)
+		if !rangeContains(params.Range, stmtRange) {
+			continue
+		}
+		edits = append(edits, protocol.TextEdit{Range: stmtRange, NewText: stmt.SQL()})
+	}
+	return edits, nil
+}
+
 func formatGoogleSQL(path, text string) (string, bool) {
 	if documentHasComments(path, text) {
 		return "", false
@@ -544,6 +570,33 @@ func documentHasComments(path, text string) bool {
 		}
 	}
 	return false
+}
+
+func rangeHasComments(path, text string, target protocol.Range) bool {
+	lex := newLexer(path, text)
+	for tok, err := range gsqlutils.LexerSeq(lex) {
+		if err != nil {
+			return true
+		}
+		for _, comment := range tok.Comments {
+			if rangesOverlap(target, tokenRange(lex, comment.Pos, comment.End)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func rangeContains(outer, inner protocol.Range) bool {
+	return comparePosition(outer.Start, inner.Start) <= 0 && comparePosition(inner.End, outer.End) <= 0
+}
+
+func rangesOverlap(a, b protocol.Range) bool {
+	return comparePosition(a.Start, b.End) < 0 && comparePosition(b.Start, a.End) < 0
+}
+
+func comparePosition(a, b protocol.Position) int {
+	return cmp.Or(cmp.Compare(a.Line, b.Line), cmp.Compare(a.Character, b.Character))
 }
 
 func documentEndPosition(text string) protocol.Position {
@@ -1462,6 +1515,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_workspaceSymbolProvider{Value: true}, nil),
 			DocumentFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanFormatting](h),
 				&protocol.Or_ServerCapabilities_documentFormattingProvider{Value: true}, nil),
+			DocumentRangeFormattingProvider: lo.Ternary(AssertInterface[lspabst.CanRangeFormatting](h),
+				&protocol.Or_ServerCapabilities_documentRangeFormattingProvider{Value: true}, nil),
 			SelectionRangeProvider: lo.Ternary(AssertInterface[lspabst.CanSelectionRange](h),
 				&protocol.Or_ServerCapabilities_selectionRangeProvider{Value: true}, nil),
 			// DefinitionProvider: true,
