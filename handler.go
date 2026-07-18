@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,6 +37,7 @@ var _ interface {
 	lspabst.CanCompletion
 	lspabst.CanCodeAction
 	lspabst.CanDefinition
+	lspabst.CanDiagnostic
 	lspabst.CanDocumentHighlight
 	lspabst.CanImplementation
 	lspabst.CanPrepareRename
@@ -1579,6 +1581,27 @@ func (h *Handler) DidChange(ctx context.Context, params *protocol.DidChangeTextD
 	return err
 }
 
+func (h *Handler) Diagnostic(ctx context.Context, params *protocol.DocumentDiagnosticParams) (*protocol.DocumentDiagnosticReport, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	resultID := fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
+	if params.PreviousResultID == resultID {
+		return &protocol.DocumentDiagnosticReport{Value: protocol.UnchangedDocumentDiagnosticReport{
+			Kind:     string(protocol.DiagnosticUnchanged),
+			ResultID: resultID,
+		}}, nil
+	}
+	_, err := memefish.ParseStatements(path, text)
+	return &protocol.DocumentDiagnosticReport{Value: protocol.FullDocumentDiagnosticReport{
+		Kind:     string(protocol.DiagnosticFull),
+		ResultID: resultID,
+		Items:    diagnosticsFromParseError(err),
+	}}, nil
+}
+
 func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error) {
 	return h.clearDiagnostics(ctx, params.TextDocument.URI)
 }
@@ -1618,14 +1641,8 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 	h.parsedMap[uri.Path()] = parsed
 
 	if err != nil {
-		if e, ok := lo.ErrorsAs[memefish.MultiError](err); ok {
-			var diags []protocol.Diagnostic
-			for _, elem := range e {
-				diags = append(diags, protocol.Diagnostic{
-					Range:   toProtocolRange(elem.Position),
-					Message: elem.Message,
-				})
-			}
+		diags := diagnosticsFromParseError(err)
+		if len(diags) > 0 {
 			if publishErr := client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
 				URI:         uri,
 				Diagnostics: diags,
@@ -1633,12 +1650,26 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 				return errors.Join(publishErr, err)
 			}
 			return err
-		} else {
-			h.logger.Info("unknown error", slog.Any("err", err))
 		}
+		h.logger.Info("unknown error", slog.Any("err", err))
 	}
 
 	return h.clearDiagnostics(ctx, uri)
+}
+
+func diagnosticsFromParseError(err error) []protocol.Diagnostic {
+	result := []protocol.Diagnostic{}
+	parseErrors, ok := lo.ErrorsAs[memefish.MultiError](err)
+	if !ok {
+		return result
+	}
+	for _, elem := range parseErrors {
+		result = append(result, protocol.Diagnostic{
+			Range:   toProtocolRange(elem.Position),
+			Message: elem.Message,
+		})
+	}
+	return result
 }
 
 func toProtocolRange(position *token.Position) protocol.Range {
@@ -1735,6 +1766,12 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				}, nil),
 			DefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanDefinition](h),
 				&protocol.Or_ServerCapabilities_definitionProvider{Value: true}, nil),
+			DiagnosticProvider: lo.Ternary(AssertInterface[lspabst.CanDiagnostic](h),
+				&protocol.Or_ServerCapabilities_diagnosticProvider{Value: protocol.DiagnosticOptions{
+					Identifier:            "memefish",
+					InterFileDependencies: false,
+					WorkspaceDiagnostics:  false,
+				}}, nil),
 			ImplementationProvider: lo.Ternary(AssertInterface[lspabst.CanImplementation](h),
 				&protocol.Or_ServerCapabilities_implementationProvider{Value: true}, nil),
 			TypeDefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanTypeDefinition](h),

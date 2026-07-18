@@ -176,6 +176,38 @@ func TestDidSaveReparsesIncludedText(t *testing.T) {
 	}
 }
 
+func TestDiagnosticReturnsFullAndUnchangedReports(t *testing.T) {
+	const path = "/test.sql"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte("SELECT FROM")
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, ok := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if !ok {
+		t.Fatalf("Diagnostic() report = %#v, want full report", got.Value)
+	}
+	if full.ResultID == "" || len(full.Items) == 0 {
+		t.Fatalf("Diagnostic() full report = %#v, want result ID and parse diagnostic", full)
+	}
+
+	got, err = h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument:     protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		PreviousResultID: full.ResultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unchanged, ok := got.Value.(protocol.UnchangedDocumentDiagnosticReport)
+	if !ok || unchanged.ResultID != full.ResultID {
+		t.Fatalf("Diagnostic() report = %#v, want unchanged report", got.Value)
+	}
+}
+
 func TestFormattingCanonicalizesCommentFreeDocument(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT  1;SELECT 2"
