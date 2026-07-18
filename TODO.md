@@ -34,8 +34,6 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 
 - [x] `textDocument/didSave`: reparse included save contents and refresh diagnostics.
 - [x] `completionItem/resolve`: add deferred signatures and summaries for function completions.
-- [ ] `codeAction/resolve`: add only after code actions are implemented.
-- [ ] `codeLens/resolve`: add only after code lenses are implemented.
 - [x] `workspace/symbol`: expose schema objects across open and indexed workspace documents.
 - [x] Workspace folder indexing: parse `.sql` and `.memefish` files from initial workspace folders.
 - [x] Workspace folder changes: add and remove indexed roots from `workspace/didChangeWorkspaceFolders`.
@@ -46,6 +44,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 ## Not Planned For Now
 
 - `documentColor`, `colorPresentation`, `inlineValue`, `moniker`, call hierarchy, type hierarchy, telemetry, and notebook support do not have clear practical value for Spanner GoogleSQL editing yet.
+- `codeAction/resolve` and `codeLens/resolve` do not reduce work while their small edits and commands are returned eagerly.
 
 ## Limitations
 
