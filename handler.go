@@ -902,11 +902,48 @@ func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionPar
 	path := params.TextDocument.URI.Path()
 	prefix := completionPrefixAt(string(h.fileToContentMap[path]), params.Position)
 	items := completionItems(string(h.fileToContentMap[path]), prefix)
+	items = appendWorkspaceCompletionItems(items, h.parsedMap, prefix)
 
 	return &protocol.CompletionList{
 		IsIncomplete: false,
 		Items:        items,
 	}, nil
+}
+
+func appendWorkspaceCompletionItems(items []protocol.CompletionItem, parsed map[string][]ast.Statement, prefix string) []protocol.CompletionItem {
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		seen[strings.ToUpper(item.Label)] = struct{}{}
+	}
+	add := func(label string, kind protocol.CompletionItemKind, detail string) {
+		if label == "" || !strings.HasPrefix(strings.ToUpper(label), strings.ToUpper(prefix)) {
+			return
+		}
+		key := strings.ToUpper(label)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		items = append(items, protocol.CompletionItem{Label: label, Kind: kind, Detail: detail})
+	}
+	for _, stmts := range parsed {
+		memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+			table, ok := node.(*ast.CreateTable)
+			if !ok {
+				return true
+			}
+			tableName := pathName(table.Name)
+			add(tableName, protocol.StructCompletion, "table in workspace")
+			for _, column := range table.Columns {
+				add(identName(column.Name), protocol.FieldCompletion, "column in workspace schema")
+			}
+			return false
+		})
+	}
+	slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
+		return strings.Compare(strings.ToUpper(a.Label), strings.ToUpper(b.Label))
+	})
+	return items
 }
 
 func (h *Handler) ResolveCompletionItem(ctx context.Context, params *protocol.CompletionItem) (*protocol.CompletionItem, error) {

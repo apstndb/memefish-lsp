@@ -6,7 +6,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 
 ## High Value
 
-- [x] `textDocument/completion`: keyword and in-document identifier completion.
+- [x] `textDocument/completion`: keyword, function, document, and workspace schema identifier completion.
 - [x] `textDocument/documentHighlight`: highlight occurrences of the identifier under the cursor.
 - [x] `textDocument/semanticTokens/range`: filter and re-encode full semantic tokens for requested ranges.
 - [x] `textDocument/semanticTokens/full/delta`: accept delta requests and return current full tokens with result IDs.

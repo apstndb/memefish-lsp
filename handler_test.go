@@ -53,6 +53,28 @@ func TestCompletionItemsIncludesGoogleSQLKeywordsAndDocumentIdentifiers(t *testi
 	}
 }
 
+func TestCompletionIncludesWorkspaceSchemaIdentifiers(t *testing.T) {
+	const text = "SELECT * FROM Si"
+	h := newParsedTestHandler(t, "/query.sql", text)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Character: uint32(len(text))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range got.Items {
+		if item.Label == "Singers" && item.Kind == protocol.StructCompletion {
+			return
+		}
+	}
+	t.Fatalf("Completion() items = %#v, want workspace Singers table", got.Items)
+}
+
 func TestSignatureHelpTracksActiveParameter(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT IF(TRUE, 1, "
