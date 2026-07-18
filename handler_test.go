@@ -764,6 +764,79 @@ func TestDidCloseRestoresIndexedWorkspaceFile(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFileEventsMaintainIndex(t *testing.T) {
+	root := t.TempDir()
+	h := NewHandler(slog.Default(), nil)
+	path := filepath.Join(root, "schema.sql")
+	uri := "file://" + filepath.ToSlash(path)
+	const initial = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)"
+	if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.DidCreateFiles(context.Background(), &protocol.CreateFilesParams{
+		Files: []protocol.FileCreate{{URI: uri}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.fileToContentMap[path]); got != initial {
+		t.Fatalf("DidCreateFiles() indexed %q, want %q", got, initial)
+	}
+
+	const changed = "CREATE TABLE Albums (AlbumId INT64) PRIMARY KEY (AlbumId)"
+	if err := os.WriteFile(path, []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+		Changes: []protocol.FileEvent{{URI: protocol.DocumentURI(uri), Type: protocol.Changed}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.fileToContentMap[path]); got != changed {
+		t.Fatalf("DidChangeWatchedFiles() indexed %q, want %q", got, changed)
+	}
+
+	h.openDocumentMap[path] = struct{}{}
+	h.fileToContentMap[path] = []byte("unsaved")
+	if err := h.DidChangeWatchedFiles(context.Background(), &protocol.DidChangeWatchedFilesParams{
+		Changes: []protocol.FileEvent{{URI: protocol.DocumentURI(uri), Type: protocol.Changed}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.fileToContentMap[path]); got != "unsaved" {
+		t.Fatalf("DidChangeWatchedFiles() replaced open document with %q", got)
+	}
+	delete(h.openDocumentMap, path)
+
+	renamedPath := filepath.Join(root, "renamed.memefish")
+	if err := os.Rename(path, renamedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.DidRenameFiles(context.Background(), &protocol.RenameFilesParams{
+		Files: []protocol.FileRename{{OldURI: uri, NewURI: "file://" + filepath.ToSlash(renamedPath)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.fileToContentMap[path]; ok {
+		t.Fatalf("DidRenameFiles() retained old path %q", path)
+	}
+	if got := string(h.fileToContentMap[renamedPath]); got != changed {
+		t.Fatalf("DidRenameFiles() indexed %q, want %q", got, changed)
+	}
+
+	if err := os.Remove(renamedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.DidDeleteFiles(context.Background(), &protocol.DeleteFilesParams{
+		Files: []protocol.FileDelete{{URI: "file://" + filepath.ToSlash(renamedPath)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.fileToContentMap[renamedPath]; ok {
+		t.Fatalf("DidDeleteFiles() retained deleted path %q", renamedPath)
+	}
+}
+
 func TestReferencesReturnsLocalTableReferences(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"

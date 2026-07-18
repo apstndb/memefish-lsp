@@ -1845,6 +1845,93 @@ func (h *Handler) restoreWorkspaceFile(path string) {
 	h.fileContentMu.Unlock()
 }
 
+func (h *Handler) indexWorkspaceFile(path string) {
+	if !isWorkspaceSQLFile(path) {
+		return
+	}
+	h.fileContentMu.Lock()
+	_, open := h.openDocumentMap[path]
+	h.fileContentMu.Unlock()
+	if open {
+		return
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		h.logger.Warn("failed to read workspace file", slog.String("path", path), slog.Any("err", err))
+		return
+	}
+	parsed, _ := memefish.ParseStatements(path, string(content))
+	h.fileContentMu.Lock()
+	h.fileToContentMap[path] = content
+	h.parsedMap[path] = parsed
+	h.workspaceFileMap[path] = struct{}{}
+	h.fileContentMu.Unlock()
+}
+
+func (h *Handler) removeWorkspaceFile(path string) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+	delete(h.workspaceFileMap, path)
+	if _, open := h.openDocumentMap[path]; open {
+		return
+	}
+	delete(h.fileToContentMap, path)
+	delete(h.parsedMap, path)
+}
+
+func fileURIPath(rawURI string) (string, bool) {
+	if !strings.HasPrefix(rawURI, "file://") {
+		return "", false
+	}
+	return protocol.DocumentURI(rawURI).Path(), true
+}
+
+func (h *Handler) DidCreateFiles(_ context.Context, params *protocol.CreateFilesParams) error {
+	for _, file := range params.Files {
+		if path, ok := fileURIPath(file.URI); ok {
+			h.indexWorkspaceFile(path)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) DidDeleteFiles(_ context.Context, params *protocol.DeleteFilesParams) error {
+	for _, file := range params.Files {
+		if path, ok := fileURIPath(file.URI); ok {
+			h.removeWorkspaceFile(path)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) DidRenameFiles(_ context.Context, params *protocol.RenameFilesParams) error {
+	for _, file := range params.Files {
+		if path, ok := fileURIPath(file.OldURI); ok {
+			h.removeWorkspaceFile(path)
+		}
+		if path, ok := fileURIPath(file.NewURI); ok {
+			h.indexWorkspaceFile(path)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) DidChangeWatchedFiles(_ context.Context, params *protocol.DidChangeWatchedFilesParams) error {
+	for _, change := range params.Changes {
+		path, ok := fileURIPath(string(change.URI))
+		if !ok {
+			continue
+		}
+		switch change.Type {
+		case protocol.Created, protocol.Changed:
+			h.indexWorkspaceFile(path)
+		case protocol.Deleted:
+			h.removeWorkspaceFile(path)
+		}
+	}
+	return nil
+}
+
 func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text string) error {
 	client, err := h.Client()
 	if err != nil {
@@ -1952,17 +2039,7 @@ func (h *Handler) indexWorkspaceFolder(ctx context.Context, root string) error {
 		if !isWorkspaceSQLFile(path) {
 			return nil
 		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			h.logger.Warn("failed to read workspace file", slog.String("path", path), slog.Any("err", err))
-			return nil
-		}
-		parsed, _ := memefish.ParseStatements(path, string(content))
-		h.fileContentMu.Lock()
-		h.fileToContentMap[path] = content
-		h.parsedMap[path] = parsed
-		h.workspaceFileMap[path] = struct{}{}
-		h.fileContentMu.Unlock()
+		h.indexWorkspaceFile(path)
 		return nil
 	})
 }
@@ -1983,6 +2060,18 @@ func isIgnoredWorkspaceDirectory(name string) bool {
 	default:
 		return false
 	}
+}
+
+func workspaceFileOperationOptions() *protocol.FileOperationRegistrationOptions {
+	return &protocol.FileOperationRegistrationOptions{Filters: []protocol.FileOperationFilter{
+		{
+			Scheme: "file",
+			Pattern: protocol.FileOperationPattern{
+				Glob:    "**/*.{sql,memefish}",
+				Matches: lo.ToPtr(protocol.FilePattern),
+			},
+		},
+	}}
 }
 
 func StringsTo[To interface{ ~string }](s []string) []To {
@@ -2030,6 +2119,11 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 		Capabilities: protocol.ServerCapabilities{
 			Workspace: &protocol.WorkspaceOptions{
 				WorkspaceFolders: &protocol.WorkspaceFolders5Gn{Supported: true},
+				FileOperations: &protocol.FileOperationOptions{
+					DidCreate: workspaceFileOperationOptions(),
+					DidRename: workspaceFileOperationOptions(),
+					DidDelete: workspaceFileOperationOptions(),
+				},
 			},
 			TextDocumentSync: lo.Ternary(AssertInterface[lspabst.TextDocumentSyncCapability](h),
 				&protocol.TextDocumentSyncOptions{
