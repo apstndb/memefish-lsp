@@ -42,6 +42,7 @@ var _ interface {
 	lspabst.CanRangeFormatting
 	lspabst.CanReferences
 	lspabst.CanRename
+	lspabst.CanResolveCompletionItem
 	lspabst.CanSemanticTokensFull
 	lspabst.CanSignatureHelp
 	lspabst.CanHover
@@ -835,6 +836,19 @@ func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionPar
 	}, nil
 }
 
+func (h *Handler) ResolveCompletionItem(ctx context.Context, params *protocol.CompletionItem) (*protocol.CompletionItem, error) {
+	result := *params
+	signature, ok := googleSQLSignatures[strings.ToUpper(params.Label)]
+	if !ok {
+		return &result, nil
+	}
+	result.Detail = signature.Label
+	result.Documentation = &protocol.Or_CompletionItem_documentation{
+		Value: protocol.MarkupContent{Kind: protocol.Markdown, Value: signature.Summary},
+	}
+	return &result, nil
+}
+
 func completionItems(text, prefix string) []protocol.CompletionItem {
 	seen := make(map[string]struct{})
 	var items []protocol.CompletionItem
@@ -857,6 +871,9 @@ func completionItems(text, prefix string) []protocol.CompletionItem {
 
 	for _, keyword := range token.Keywords {
 		add(string(keyword), protocol.KeywordCompletion, "GoogleSQL keyword")
+	}
+	for name, signature := range googleSQLSignatures {
+		add(name, protocol.FunctionCompletion, signature.Label)
 	}
 
 	lex := newLexer("", text)
@@ -1712,7 +1729,10 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 					RetriggerCharacters: []string{","},
 				}, nil),
 			CompletionProvider: lo.Ternary(AssertInterface[lspabst.CanCompletion](h),
-				&protocol.CompletionOptions{TriggerCharacters: []string{" ", ".", "_"}}, nil),
+				&protocol.CompletionOptions{
+					TriggerCharacters: []string{" ", ".", "_"},
+					ResolveProvider:   AssertInterface[lspabst.CanResolveCompletionItem](h),
+				}, nil),
 			DefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanDefinition](h),
 				&protocol.Or_ServerCapabilities_definitionProvider{Value: true}, nil),
 			ImplementationProvider: lo.Ternary(AssertInterface[lspabst.CanImplementation](h),

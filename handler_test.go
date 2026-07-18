@@ -118,6 +118,39 @@ func TestCompletionPrefixAt(t *testing.T) {
 	}
 }
 
+func TestCompletionItemsIncludesSignatureCatalogFunctions(t *testing.T) {
+	items := completionItems("SELECT ", "sub")
+	if len(items) != 2 {
+		t.Fatalf("completionItems() returned %d SUB functions, want SUBSTR and SUBSTRING: %#v", len(items), items)
+	}
+	if items[0].Label != "SUBSTR" || items[0].Kind != protocol.FunctionCompletion {
+		t.Fatalf("completionItems()[0] = %#v, want SUBSTR function", items[0])
+	}
+}
+
+func TestResolveCompletionItemAddsFunctionDocumentation(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	original := &protocol.CompletionItem{Label: "SUBSTR", Kind: protocol.FunctionCompletion}
+
+	got, err := h.ResolveCompletionItem(context.Background(), original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Detail != "SUBSTR(value, position[, length])" {
+		t.Fatalf("ResolveCompletionItem() detail = %q", got.Detail)
+	}
+	if got.Documentation == nil {
+		t.Fatal("ResolveCompletionItem() documentation is nil")
+	}
+	markup, ok := got.Documentation.Value.(protocol.MarkupContent)
+	if !ok || !strings.Contains(markup.Value, "substring") {
+		t.Fatalf("ResolveCompletionItem() documentation = %#v", got.Documentation.Value)
+	}
+	if original.Detail != "" || original.Documentation != nil {
+		t.Fatalf("ResolveCompletionItem() mutated original item: %#v", original)
+	}
+}
+
 func TestDidSaveReparsesIncludedText(t *testing.T) {
 	const path = "/test.sql"
 	text := "SELECT 1"
