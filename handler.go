@@ -31,10 +31,19 @@ var _ interface {
 	lspabst.CanInitialize
 	lspabst.CanDidOpen
 	lspabst.CanDidClose
+	lspabst.CanCompletion
+	lspabst.CanDefinition
+	lspabst.CanDocumentHighlight
+	lspabst.CanPrepareRename
+	lspabst.CanReferences
+	lspabst.CanRename
 	lspabst.CanSemanticTokensFull
 	lspabst.CanHover
+	lspabst.CanInlayHint
 	lspabst.TextDocumentSyncCapability
 	lspabst.CanDocumentSymbol
+	lspabst.CanFoldingRange
+	lspabst.CanSelectionRange
 } = (*Handler)(nil)
 
 type Handler struct {
@@ -394,20 +403,376 @@ func (h *Handler) Client() (protocol.Client, error) {
 }
 
 func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureHelpParams) (result *protocol.SignatureHelp, err error) {
-	//TODO implement me
-	panic("implement me")
-	return &protocol.SignatureHelp{
-		Signatures: []protocol.SignatureInformation{
-			{
-				Label:           "",
-				Documentation:   nil,
-				Parameters:      nil,
-				ActiveParameter: lo.ToPtr(uint32(0)),
-			},
-		},
-		ActiveParameter: lo.ToPtr(uint32(0)),
-		ActiveSignature: 0,
+	return nil, nil
+}
+
+func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	prefix := completionPrefixAt(string(h.fileToContentMap[path]), params.Position)
+	items := completionItems(string(h.fileToContentMap[path]), prefix)
+
+	return &protocol.CompletionList{
+		IsIncomplete: false,
+		Items:        items,
 	}, nil
+}
+
+func completionItems(text, prefix string) []protocol.CompletionItem {
+	seen := make(map[string]struct{})
+	var items []protocol.CompletionItem
+
+	add := func(label string, kind protocol.CompletionItemKind, detail string) {
+		if label == "" || !strings.HasPrefix(strings.ToUpper(label), strings.ToUpper(prefix)) {
+			return
+		}
+		key := strings.ToUpper(label)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		items = append(items, protocol.CompletionItem{
+			Label:  label,
+			Kind:   kind,
+			Detail: detail,
+		})
+	}
+
+	for _, keyword := range token.Keywords {
+		add(string(keyword), protocol.KeywordCompletion, "GoogleSQL keyword")
+	}
+
+	lex := newLexer("", text)
+	for tok, err := range gsqlutils.LexerSeq(lex) {
+		if err != nil {
+			break
+		}
+		if tok.Kind == token.TokenIdent {
+			add(tok.AsString, protocol.VariableCompletion, "identifier in this document")
+		}
+	}
+
+	slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
+		return strings.Compare(strings.ToUpper(a.Label), strings.ToUpper(b.Label))
+	})
+	return items
+}
+
+func completionPrefixAt(text string, pos protocol.Position) string {
+	line := lineAt(text, int(pos.Line))
+	char := min(int(pos.Character), len(line))
+	start := char
+	for start > 0 && isIdentChar(line[start-1]) {
+		start--
+	}
+	return line[start:char]
+}
+
+func lineAt(text string, lineNo int) string {
+	lines := strings.Split(text, "\n")
+	if lineNo < 0 || lineNo >= len(lines) {
+		return ""
+	}
+	return lines[lineNo]
+}
+
+func isIdentChar(b byte) bool {
+	return 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' || b == '_'
+}
+
+func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.DocumentHighlightParams) ([]protocol.DocumentHighlight, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	target, ok := identifierAtPosition(path, text, params.Position)
+	if !ok {
+		return nil, nil
+	}
+
+	lex := newLexer(path, text)
+	var result []protocol.DocumentHighlight
+	for tok, err := range gsqlutils.LexerSeq(lex) {
+		if err != nil {
+			break
+		}
+		if tok.Kind == token.TokenIdent && strings.EqualFold(tok.AsString, target) {
+			result = append(result, protocol.DocumentHighlight{
+				Range: tokenRange(lex, tok.Pos, tok.End),
+				Kind:  protocol.Text,
+			})
+		}
+	}
+	return result, nil
+}
+
+func identifierAtPosition(path, text string, pos protocol.Position) (string, bool) {
+	lex := newLexer(path, text)
+	for tok, err := range gsqlutils.LexerSeq(lex) {
+		if err != nil {
+			return "", false
+		}
+		if tok.Kind != token.TokenIdent {
+			continue
+		}
+		if include(lex.Position(tok.Pos, tok.End), pos) {
+			return tok.AsString, true
+		}
+	}
+	return "", false
+}
+
+func tokenRange(lex *memefish.Lexer, pos, end token.Pos) protocol.Range {
+	return toProtocolRange(lex.Position(pos, end))
+}
+
+func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionParams) ([]protocol.Location, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	uri := params.TextDocument.URI
+	path := uri.Path()
+	text := string(h.fileToContentMap[path])
+	lex := newLexer(path, text)
+	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
+	if !ok {
+		return nil, nil
+	}
+
+	defs := tableDefinitions(h.parsedMap[path])
+	def, ok := defs[strings.ToUpper(target)]
+	if !ok {
+		return nil, nil
+	}
+	return []protocol.Location{{
+		URI:   uri,
+		Range: rangeByNode(lex, def.Name),
+	}}, nil
+}
+
+func (h *Handler) References(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	uri := params.TextDocument.URI
+	path := uri.Path()
+	text := string(h.fileToContentMap[path])
+	lex := newLexer(path, text)
+	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
+	if !ok {
+		return nil, nil
+	}
+
+	defs := tableDefinitions(h.parsedMap[path])
+	if _, ok := defs[strings.ToUpper(target)]; !ok {
+		return nil, nil
+	}
+
+	var result []protocol.Location
+	memewalk.InspectSlice(h.parsedMap[path], func(path []string, node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.CreateTable:
+			if strings.EqualFold(pathName(n.Name), target) && params.Context.IncludeDeclaration {
+				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Name)})
+			}
+		case *ast.PathTableExpr:
+			if strings.EqualFold(pathName(n.Path), target) {
+				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Path)})
+			}
+		case *ast.TableName:
+			if strings.EqualFold(identName(n.Table), target) {
+				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Table)})
+			}
+		}
+		return true
+	})
+	return result, nil
+}
+
+func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRenameParams) (*protocol.PrepareRenameResult, error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	path := params.TextDocument.URI.Path()
+	text := string(h.fileToContentMap[path])
+	lex := newLexer(path, text)
+	symbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position)
+	if !ok {
+		return nil, nil
+	}
+	if _, ok := tableDefinitions(h.parsedMap[path])[strings.ToUpper(symbol.Name)]; !ok {
+		return nil, nil
+	}
+
+	return &protocol.PrepareRenameResult{
+		Range:       symbol.Range,
+		Placeholder: symbol.Name,
+	}, nil
+}
+
+func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
+	if !isUnquotedIdentifier(params.NewName) {
+		return nil, fmt.Errorf("invalid table rename target %q", params.NewName)
+	}
+
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
+	uri := params.TextDocument.URI
+	path := uri.Path()
+	text := string(h.fileToContentMap[path])
+	lex := newLexer(path, text)
+	symbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position)
+	if !ok {
+		return nil, nil
+	}
+	if _, ok := tableDefinitions(h.parsedMap[path])[strings.ToUpper(symbol.Name)]; !ok {
+		return nil, nil
+	}
+
+	edits := simpleTableRenameEdits(lex, h.parsedMap[path], symbol.Name, params.NewName)
+	if len(edits) == 0 {
+		return nil, nil
+	}
+
+	return &protocol.WorkspaceEdit{
+		Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+			uri: edits,
+		},
+	}, nil
+}
+
+type tableSymbol struct {
+	Name  string
+	Range protocol.Range
+}
+
+func simpleTableSymbolAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
+	var result tableSymbol
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		if result.Name != "" {
+			return false
+		}
+		switch n := node.(type) {
+		case *ast.CreateTable:
+			if !isSimplePath(n.Name) || !include(positionByNode(lex, n.Name), pos) {
+				return true
+			}
+			result = tableSymbol{Name: pathName(n.Name), Range: rangeByNode(lex, n.Name)}
+			return false
+		case *ast.PathTableExpr:
+			if !isSimplePath(n.Path) || !include(positionByNode(lex, n.Path), pos) {
+				return true
+			}
+			result = tableSymbol{Name: pathName(n.Path), Range: rangeByNode(lex, n.Path)}
+			return false
+		case *ast.TableName:
+			if !include(positionByNode(lex, n.Table), pos) {
+				return true
+			}
+			result = tableSymbol{Name: identName(n.Table), Range: rangeByNode(lex, n.Table)}
+			return false
+		}
+		return true
+	})
+	return result, result.Name != ""
+}
+
+func simpleTableRenameEdits(lex *memefish.Lexer, stmts []ast.Statement, oldName, newName string) []protocol.TextEdit {
+	var edits []protocol.TextEdit
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.CreateTable:
+			if isSimplePath(n.Name) && strings.EqualFold(pathName(n.Name), oldName) {
+				edits = append(edits, protocol.TextEdit{Range: rangeByNode(lex, n.Name), NewText: newName})
+			}
+		case *ast.PathTableExpr:
+			if isSimplePath(n.Path) && strings.EqualFold(pathName(n.Path), oldName) {
+				edits = append(edits, protocol.TextEdit{Range: rangeByNode(lex, n.Path), NewText: newName})
+			}
+		case *ast.TableName:
+			if strings.EqualFold(identName(n.Table), oldName) {
+				edits = append(edits, protocol.TextEdit{Range: rangeByNode(lex, n.Table), NewText: newName})
+			}
+		}
+		return true
+	})
+	return edits
+}
+
+func isSimplePath(path *ast.Path) bool {
+	return path != nil && len(path.Idents) == 1
+}
+
+func isUnquotedIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		switch {
+		case i == 0 && ('0' <= s[i] && s[i] <= '9'):
+			return false
+		case !isIdentChar(s[i]):
+			return false
+		}
+	}
+	return true
+}
+
+func tableNameAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos protocol.Position) (string, bool) {
+	var result string
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		if result != "" {
+			return false
+		}
+		switch n := node.(type) {
+		case *ast.CreateTable:
+			if include(positionByNode(lex, n.Name), pos) {
+				result = pathName(n.Name)
+				return false
+			}
+		case *ast.PathTableExpr:
+			if include(positionByNode(lex, n.Path), pos) {
+				result = pathName(n.Path)
+				return false
+			}
+		case *ast.TableName:
+			if include(positionByNode(lex, n.Table), pos) {
+				result = identName(n.Table)
+				return false
+			}
+		}
+		return true
+	})
+	return result, result != ""
+}
+
+func tableDefinitions(stmts []ast.Statement) map[string]*ast.CreateTable {
+	result := make(map[string]*ast.CreateTable)
+	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		if n, ok := node.(*ast.CreateTable); ok {
+			result[strings.ToUpper(pathName(n.Name))] = n
+		}
+		return true
+	})
+	return result
+}
+
+func pathName(path *ast.Path) string {
+	if path == nil {
+		return ""
+	}
+	return fullname(path.Idents)
+}
+
+func identName(ident *ast.Ident) string {
+	if ident == nil {
+		return ""
+	}
+	return ident.Name
 }
 
 func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error) {
@@ -520,7 +885,7 @@ func positionByNode(lex *memefish.Lexer, node ast.Node) *token.Position {
 	return lex.Position(node.Pos(), node.End())
 }
 
-func (h *Handler) FoldingRanges(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error) {
+func (h *Handler) FoldingRange(ctx context.Context, params *protocol.FoldingRangeParams) (result []protocol.FoldingRange, err error) {
 	Path := params.TextDocument.URI.Path()
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
@@ -847,6 +1212,16 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 				&protocol.Or_ServerCapabilities_foldingRangeProvider{Value: true}, nil),
 			HoverProvider: lo.Ternary(AssertInterface[lspabst.CanHover](h),
 				&protocol.Or_ServerCapabilities_hoverProvider{Value: true}, nil),
+			CompletionProvider: lo.Ternary(AssertInterface[lspabst.CanCompletion](h),
+				&protocol.CompletionOptions{TriggerCharacters: []string{" ", ".", "_"}}, nil),
+			DefinitionProvider: lo.Ternary(AssertInterface[lspabst.CanDefinition](h),
+				&protocol.Or_ServerCapabilities_definitionProvider{Value: true}, nil),
+			DocumentHighlightProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentHighlight](h),
+				&protocol.Or_ServerCapabilities_documentHighlightProvider{Value: true}, nil),
+			ReferencesProvider: lo.Ternary(AssertInterface[lspabst.CanReferences](h),
+				&protocol.Or_ServerCapabilities_referencesProvider{Value: true}, nil),
+			RenameProvider: lo.Ternary(AssertInterface[lspabst.CanRename](h),
+				&protocol.RenameOptions{PrepareProvider: AssertInterface[lspabst.CanPrepareRename](h)}, nil),
 			InlayHintProvider: lo.Ternary(AssertInterface[lspabst.CanInlayHint](h),
 				&protocol.Or_ServerCapabilities_inlayHintProvider{Value: true}, nil),
 			DocumentSymbolProvider: lo.Ternary(AssertInterface[lspabst.CanDocumentSymbol](h),
