@@ -47,6 +47,7 @@ var _ interface {
 	lspabst.CanRename
 	lspabst.CanResolveCompletionItem
 	lspabst.CanSemanticTokensFull
+	lspabst.CanSemanticTokensRange
 	lspabst.CanSignatureHelp
 	lspabst.CanHover
 	lspabst.CanInlayHint
@@ -1499,6 +1500,9 @@ func newSemanticToken(lex *memefish.Lexer, pos, end token.Pos, tokenType protoco
 }
 
 func (h *Handler) SemanticTokensFull(ctx context.Context, params *protocol.SemanticTokensParams) (result *protocol.SemanticTokens, err error) {
+	h.fileContentMu.Lock()
+	defer h.fileContentMu.Unlock()
+
 	var data []uint32
 	filepath := params.TextDocument.URI.Path()
 	s := string(h.fileToContentMap[params.TextDocument.URI.Path()])
@@ -1587,6 +1591,59 @@ loop:
 	h.logger.Info("SemanticContextFull", slog.Any("result", result))
 
 	return result, err
+}
+
+func (h *Handler) SemanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
+	full, err := h.SemanticTokensFull(ctx, &protocol.SemanticTokensParams{TextDocument: params.TextDocument})
+	if err != nil {
+		return nil, err
+	}
+	return filterSemanticTokens(full, params.Range), nil
+}
+
+func filterSemanticTokens(tokens *protocol.SemanticTokens, target protocol.Range) *protocol.SemanticTokens {
+	result := &protocol.SemanticTokens{Data: []uint32{}}
+	if tokens == nil {
+		return result
+	}
+
+	var line, character uint32
+	var resultLine, resultCharacter uint32
+	for i := 0; i+4 < len(tokens.Data); i += 5 {
+		deltaLine := tokens.Data[i]
+		deltaCharacter := tokens.Data[i+1]
+		line += deltaLine
+		if deltaLine == 0 {
+			character += deltaCharacter
+		} else {
+			character = deltaCharacter
+		}
+		length := tokens.Data[i+2]
+		tokenRange := protocol.Range{
+			Start: protocol.Position{Line: line, Character: character},
+			End:   protocol.Position{Line: line, Character: character + length},
+		}
+		if !rangesOverlap(target, tokenRange) {
+			continue
+		}
+
+		resultDeltaLine := line - resultLine
+		resultDeltaCharacter := character
+		if resultDeltaLine == 0 {
+			resultDeltaCharacter = character - resultCharacter
+		}
+		result.Data = append(
+			result.Data,
+			resultDeltaLine,
+			resultDeltaCharacter,
+			length,
+			tokens.Data[i+3],
+			tokens.Data[i+4],
+		)
+		resultLine = line
+		resultCharacter = character
+	}
+	return result
 }
 
 func (h *Handler) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) (err error) {
@@ -1761,7 +1818,8 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 					TokenTypes:     semanticTokens.TokenTypes,
 					TokenModifiers: semanticTokens.TokenModifiers,
 				},
-				"full": true,
+				"full":  true,
+				"range": AssertInterface[lspabst.CanSemanticTokensRange](h),
 			},
 			FoldingRangeProvider: lo.Ternary(AssertInterface[lspabst.CanFoldingRange](h),
 				&protocol.Or_ServerCapabilities_foldingRangeProvider{Value: true}, nil),

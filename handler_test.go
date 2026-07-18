@@ -351,6 +351,23 @@ func TestDocumentHighlightHighlightsIdentifierOccurrences(t *testing.T) {
 	}
 }
 
+func TestFilterSemanticTokensReencodesSelectedRange(t *testing.T) {
+	full := &protocol.SemanticTokens{Data: []uint32{
+		0, 1, 2, 1, 0,
+		1, 3, 4, 2, 1,
+		0, 6, 2, 3, 0,
+	}}
+
+	got := filterSemanticTokens(full, protocol.Range{
+		Start: protocol.Position{Line: 1, Character: 2},
+		End:   protocol.Position{Line: 1, Character: 8},
+	})
+	want := []uint32{1, 3, 4, 2, 1}
+	if !slices.Equal(got.Data, want) {
+		t.Fatalf("filterSemanticTokens() = %v, want %v", got.Data, want)
+	}
+}
+
 func TestCodeActionReturnsInsertASQuickFix(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT SingerId singer FROM Singers"
