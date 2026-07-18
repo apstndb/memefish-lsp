@@ -10,8 +10,8 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [x] `textDocument/documentHighlight`: highlight occurrences of the identifier under the cursor.
 - [x] `textDocument/semanticTokens/range`: filter and re-encode full semantic tokens for requested ranges.
 - [x] `textDocument/semanticTokens/full/delta`: accept delta requests and return current full tokens with result IDs.
-- [x] `textDocument/definition`: jump from table references to local `CREATE TABLE` definitions.
-- [x] `textDocument/declaration`: use local `CREATE TABLE` definitions as table declarations.
+- [x] `textDocument/definition`: jump from table references to workspace `CREATE TABLE` definitions.
+- [x] `textDocument/declaration`: use workspace `CREATE TABLE` definitions as table declarations.
 - [x] `textDocument/references`: find local `CREATE TABLE` declarations and table references.
 - [x] `textDocument/formatting`: format valid comment-free documents without discarding comments.
 - [x] `textDocument/rangeFormatting`: format complete comment-free statements inside a selection.
@@ -28,7 +28,7 @@ This list tracks LSP4IJ-supported or LSP4IJ-consumed features that `memefish-lsp
 - [x] `textDocument/rename` and `textDocument/prepareRename`: local rename for simple local table symbols.
 - [x] `textDocument/linkedEditingRange`: link exact-case local table declarations and references.
 - [x] `textDocument/typeDefinition`: jump to a uniquely named column type across parsed open documents.
-- [x] `textDocument/implementation`: alias to local table definition lookup for this SQL language server.
+- [x] `textDocument/implementation`: alias to workspace table definition lookup for this SQL language server.
 
 ## Low Value Or Client/Workspace Dependent
 

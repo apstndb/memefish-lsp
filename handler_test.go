@@ -547,6 +547,25 @@ func TestDefinitionReturnsLocalCreateTableLocation(t *testing.T) {
 	}
 }
 
+func TestDefinitionReturnsWorkspaceCreateTableLocation(t *testing.T) {
+	const queryPath = "/query.sql"
+	h := newParsedTestHandler(t, queryPath, "SELECT * FROM Singers")
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+
+	got, err := h.Definition(context.Background(), &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     protocol.Position{Character: 16},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].URI != "file:///schema.sql" {
+		t.Fatalf("Definition() = %#v, want schema table location", got)
+	}
+}
+
 func TestDeclarationReturnsLocalCreateTableLocation(t *testing.T) {
 	const path = "/test.sql"
 	const text = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);\nSELECT * FROM Singers"

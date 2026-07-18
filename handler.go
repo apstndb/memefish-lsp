@@ -1043,8 +1043,7 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
-	uri := params.TextDocument.URI
-	path := uri.Path()
+	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
 	lex := newLexer(path, text)
 	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
@@ -1052,15 +1051,30 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 		return nil, nil
 	}
 
-	defs := tableDefinitions(h.parsedMap[path])
-	def, ok := defs[strings.ToUpper(target)]
-	if !ok {
-		return nil, nil
+	return h.tableDefinitionLocations(target), nil
+}
+
+func (h *Handler) tableDefinitionLocations(target string) []protocol.Location {
+	result := []protocol.Location{}
+	for path, stmts := range h.parsedMap {
+		lex := newLexer(path, string(h.fileToContentMap[path]))
+		for _, def := range tableDefinitions(stmts) {
+			if strings.EqualFold(pathName(def.Name), target) {
+				result = append(result, protocol.Location{
+					URI:   protocol.URIFromPath(path),
+					Range: rangeByNode(lex, def.Name),
+				})
+			}
+		}
 	}
-	return []protocol.Location{{
-		URI:   uri,
-		Range: rangeByNode(lex, def.Name),
-	}}, nil
+	slices.SortFunc(result, func(a, b protocol.Location) int {
+		return cmp.Or(
+			strings.Compare(string(a.URI), string(b.URI)),
+			cmp.Compare(a.Range.Start.Line, b.Range.Start.Line),
+			cmp.Compare(a.Range.Start.Character, b.Range.Start.Character),
+		)
+	})
+	return result
 }
 
 func (h *Handler) Declaration(ctx context.Context, params *protocol.DeclarationParams) (*protocol.Or_textDocument_declaration, error) {
