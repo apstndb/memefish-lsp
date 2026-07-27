@@ -57,9 +57,11 @@ type viewFact struct {
 }
 
 type queryColumnFact struct {
-	name     ddlName
-	sql      string
-	explicit bool
+	name        ddlName
+	sql         string
+	explicit    bool
+	sourceName  string
+	sourceRange protocol.Range
 }
 
 type ddlSymbolFact struct {
@@ -179,13 +181,36 @@ func extractQueryColumnFacts(index textIndex, query ast.QueryExpr) ([]queryColum
 			return nil, false
 		}
 		seen[key] = struct{}{}
+		sourceName, sourceRange := queryColumnSource(index, item)
 		columns = append(columns, queryColumnFact{
-			name:     ddlNameFromIdent(index, ident),
-			sql:      item.SQL(),
-			explicit: explicit,
+			name:        ddlNameFromIdent(index, ident),
+			sql:         item.SQL(),
+			explicit:    explicit,
+			sourceName:  sourceName,
+			sourceRange: sourceRange,
 		})
 	}
 	return columns, true
+}
+
+func queryColumnSource(index textIndex, item ast.SelectItem) (string, protocol.Range) {
+	var expr ast.Expr
+	switch item := item.(type) {
+	case *ast.Alias:
+		expr = item.Expr
+	case *ast.ExprSelectItem:
+		expr = item.Expr
+	}
+	switch expr := expr.(type) {
+	case *ast.Ident:
+		return identName(expr), nodeRange(index, expr)
+	case *ast.Path:
+		if len(expr.Idents) > 0 {
+			ident := expr.Idents[len(expr.Idents)-1]
+			return identName(ident), nodeRange(index, ident)
+		}
+	}
+	return "", protocol.Range{}
 }
 
 func ddlNameFromPath(index textIndex, path *ast.Path) ddlName {

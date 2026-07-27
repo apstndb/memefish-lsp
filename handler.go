@@ -1382,15 +1382,12 @@ func (h *Handler) TypeDefinition(ctx context.Context, params *protocol.TypeDefin
 	if h.selectAliasIndexLocked(path, text).ambiguousAtPosition(params.Position) {
 		return []protocol.Location{}, nil
 	}
-	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
-		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
-		if len(matches) == 1 {
-			return []protocol.Location{{
-				URI:   matches[0].uri,
-				Range: matches[0].column.typeRange,
-			}}, nil
-		}
-		return []protocol.Location{}, nil
+	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok {
+		return h.aliasMemberTypeDefinitionLocked(
+			path,
+			member,
+			make(map[queryColumnTypeVisit]struct{}),
+		), nil
 	}
 	columnName, ok := identifierAtPosition(path, text, params.Position)
 	if !ok {
