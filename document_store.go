@@ -186,6 +186,10 @@ func (h *Handler) publishDocumentDiagnostics(
 
 	h.fileContentMu.Lock()
 	current := h.documents[snapshot.path]
+	var diagnostics []protocol.Diagnostic
+	if current == snapshot {
+		diagnostics, _ = h.documentDiagnosticStateLocked(snapshot)
+	}
 	h.fileContentMu.Unlock()
 	if current != snapshot {
 		return nil
@@ -202,7 +206,7 @@ func (h *Handler) publishDocumentDiagnostics(
 	return client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
 		URI:         uri,
 		Version:     version,
-		Diagnostics: snapshot.diagnostics,
+		Diagnostics: diagnostics,
 	})
 }
 

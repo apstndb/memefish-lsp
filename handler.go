@@ -2038,16 +2038,19 @@ func (h *Handler) Diagnostic(ctx context.Context, params *protocol.DocumentDiagn
 	if snapshot == nil {
 		snapshot = parseDocumentSnapshot(path, text, 0, 0, 0, nil)
 	}
-	if params.PreviousResultID == snapshot.resultID {
+	h.fileContentMu.Lock()
+	diagnostics, resultID := h.documentDiagnosticStateLocked(snapshot)
+	h.fileContentMu.Unlock()
+	if params.PreviousResultID == resultID {
 		return &protocol.DocumentDiagnosticReport{Value: protocol.UnchangedDocumentDiagnosticReport{
 			Kind:     string(protocol.DiagnosticUnchanged),
-			ResultID: snapshot.resultID,
+			ResultID: resultID,
 		}}, nil
 	}
 	return &protocol.DocumentDiagnosticReport{Value: protocol.FullDocumentDiagnosticReport{
 		Kind:     string(protocol.DiagnosticFull),
-		ResultID: snapshot.resultID,
-		Items:    snapshot.diagnostics,
+		ResultID: resultID,
+		Items:    diagnostics,
 	}}, nil
 }
 
@@ -2085,14 +2088,17 @@ func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.Work
 		if snapshot.resultID == "" {
 			snapshot = parseDocumentSnapshot(path, snapshot.text, 0, 0, 0, nil)
 		}
+		h.fileContentMu.Lock()
+		diagnostics, resultID := h.documentDiagnosticStateLocked(snapshot)
+		h.fileContentMu.Unlock()
 		uri := protocol.URIFromPath(path)
-		if previous[uri] == snapshot.resultID {
+		if previous[uri] == resultID {
 			report.Items = append(report.Items, protocol.WorkspaceDocumentDiagnosticReport{Value: protocol.WorkspaceUnchangedDocumentDiagnosticReport{
 				URI:     uri,
 				Version: 0,
 				UnchangedDocumentDiagnosticReport: protocol.UnchangedDocumentDiagnosticReport{
 					Kind:     string(protocol.DiagnosticUnchanged),
-					ResultID: snapshot.resultID,
+					ResultID: resultID,
 				},
 			}})
 			continue
@@ -2102,8 +2108,8 @@ func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.Work
 			Version: 0,
 			FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
 				Kind:     string(protocol.DiagnosticFull),
-				ResultID: snapshot.resultID,
-				Items:    snapshot.diagnostics,
+				ResultID: resultID,
+				Items:    diagnostics,
 			},
 		}})
 	}
@@ -2555,7 +2561,7 @@ func (h *Handler) Initialize(ctx context.Context, params *protocol.ParamInitiali
 			DiagnosticProvider: lo.Ternary(AssertInterface[lspabst.CanDiagnostic](h),
 				&protocol.Or_ServerCapabilities_diagnosticProvider{Value: protocol.DiagnosticOptions{
 					Identifier:            "memefish",
-					InterFileDependencies: false,
+					InterFileDependencies: true,
 					WorkspaceDiagnostics:  AssertInterface[lspabst.CanDiagnosticWorkspace](h),
 				}}, nil),
 			ImplementationProvider: lo.Ternary(AssertInterface[lspabst.CanImplementation](h),

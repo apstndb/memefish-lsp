@@ -416,6 +416,132 @@ func TestDiagnosticReturnsFullAndUnchangedReports(t *testing.T) {
 	}
 }
 
+func TestDiagnosticReportsUnknownColumnOnExplicitTableAlias(t *testing.T) {
+	const query = "SELECT s.UnknownColumn FROM Singers AS s"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, ok := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if !ok || len(full.Items) != 1 {
+		t.Fatalf("Diagnostic() = %#v, want one full diagnostic", got.Value)
+	}
+	diagnostic := full.Items[0]
+	if diagnostic.Code != unknownColumnDiagnosticCode ||
+		diagnostic.Severity != protocol.SeverityError ||
+		diagnostic.Range.Start != newTextIndex(query).position(strings.Index(query, "UnknownColumn")) {
+		t.Fatalf("Diagnostic() item = %#v, want unknown-column error", diagnostic)
+	}
+	if len(diagnostic.RelatedInformation) != 1 ||
+		diagnostic.RelatedInformation[0].Location.URI != "file:///schema.sql" {
+		t.Fatalf("Diagnostic() related information = %#v, want schema table", diagnostic.RelatedInformation)
+	}
+}
+
+func TestDiagnosticUnknownColumnResultChangesWithSchema(t *testing.T) {
+	const query = "SELECT s.Name FROM Singers AS s"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+
+	first, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstFull := first.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(firstFull.Items) != 1 {
+		t.Fatalf("first Diagnostic() items = %#v, want unknown Name", firstFull.Items)
+	}
+
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64, Name STRING(MAX)) PRIMARY KEY (SingerId)")
+	second, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument:     protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+		PreviousResultID: firstFull.ResultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondFull, ok := second.Value.(protocol.FullDocumentDiagnosticReport)
+	if !ok || len(secondFull.Items) != 0 {
+		t.Fatalf("second Diagnostic() = %#v, want full report without diagnostics", second.Value)
+	}
+	if secondFull.ResultID == firstFull.ResultID {
+		t.Fatalf("Diagnostic() result ID did not change after schema update: %q", secondFull.ResultID)
+	}
+}
+
+func TestDiagnosticSkipsUnresolvedAndCTEBackedTables(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "unresolved table", query: "SELECT s.UnknownColumn FROM RemoteTable AS s"},
+		{name: "CTE", query: "WITH LocalRows AS (SELECT 1 AS Id) SELECT r.UnknownColumn FROM LocalRows AS r"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			h := newParsedTestHandler(t, "/query.sql", test.query)
+			got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			full := got.Value.(protocol.FullDocumentDiagnosticReport)
+			if len(full.Items) != 0 {
+				t.Fatalf("Diagnostic() items = %#v, want none without a unique physical table shape", full.Items)
+			}
+		})
+	}
+}
+
+func TestDiagnosticSkipsAmbiguousTableDefinitions(t *testing.T) {
+	const query = "SELECT s.UnknownColumn FROM Singers AS s"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema_a.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/schema_b.sql", "CREATE TABLE Singers (Name STRING(MAX)) PRIMARY KEY (Name)")
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 0 {
+		t.Fatalf("Diagnostic() items = %#v, want none for ambiguous table definitions", full.Items)
+	}
+}
+
+func TestDidOpenPublishesUnknownColumnDiagnostic(t *testing.T) {
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	client := &recordingClient{}
+	h.SetClient(client)
+
+	err := h.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     "file:///query.sql",
+			Version: 1,
+			Text:    "SELECT s.UnknownColumn FROM Singers AS s",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.diagnostics) != 1 ||
+		len(client.diagnostics[0].Diagnostics) != 1 ||
+		client.diagnostics[0].Diagnostics[0].Code != unknownColumnDiagnosticCode {
+		t.Fatalf("published diagnostics = %#v, want one unknown-column diagnostic", client.diagnostics)
+	}
+}
+
 func TestFormattingCanonicalizesCommentFreeDocument(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT  1;SELECT 2"
