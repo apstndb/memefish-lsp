@@ -24,6 +24,7 @@ type successfulDocumentSnapshot struct {
 	index      textIndex
 	statements []ast.Statement
 	facts      documentFacts
+	ctes       cteIndex
 	revision   uint64
 }
 
@@ -33,6 +34,7 @@ type documentSnapshot struct {
 	index          textIndex
 	statements     []ast.Statement
 	facts          documentFacts
+	ctes           cteIndex
 	diagnostics    []protocol.Diagnostic
 	parseErr       error
 	resultID       string
@@ -52,12 +54,14 @@ func parseDocumentSnapshot(
 	statements, parseErr := memefish.ParseStatements(path, text)
 	index := newTextIndex(text)
 	facts := extractDDLFacts(index, statements)
+	ctes := extractCTEIndex(index, statements)
 	snapshot := &documentSnapshot{
 		path:        path,
 		text:        text,
 		index:       index,
 		statements:  statements,
 		facts:       facts,
+		ctes:        ctes,
 		diagnostics: diagnosticsFromParseError(parseErr, text),
 		parseErr:    parseErr,
 		resultID:    fmt.Sprintf("%x", sha256.Sum256([]byte(text))),
@@ -83,6 +87,7 @@ func successfulSnapshot(snapshot *documentSnapshot) *successfulDocumentSnapshot 
 		index:      snapshot.index,
 		statements: snapshot.statements,
 		facts:      snapshot.facts,
+		ctes:       snapshot.ctes,
 		revision:   snapshot.revision,
 	}
 }

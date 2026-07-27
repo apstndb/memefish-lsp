@@ -978,6 +978,9 @@ func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.Docume
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return site.binding.highlights(), nil
+	}
 	target, ok := identifierAtPosition(path, text, params.Position)
 	if !ok {
 		return nil, nil
@@ -1030,6 +1033,12 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return []protocol.Location{{
+			URI:   params.TextDocument.URI,
+			Range: site.binding.declarationRange,
+		}}, nil
+	}
 	lex := newLexer(path, text)
 	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
@@ -1102,6 +1111,9 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
+	}
 	lex := newLexer(path, text)
 	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
@@ -1115,7 +1127,8 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 	result := []protocol.Location{}
 	for candidatePath, stmts := range h.parsedMap {
 		candidateURI := protocol.URIFromPath(candidatePath)
-		candidateLexer := newLexer(candidatePath, string(h.fileToContentMap[candidatePath]))
+		candidateText := string(h.fileToContentMap[candidatePath])
+		candidateLexer := newLexer(candidatePath, candidateText)
 		if params.Context.IncludeDeclaration {
 			for _, def := range tableDefinitions(stmts) {
 				if strings.EqualFold(pathName(def.Name), target) {
@@ -1123,7 +1136,13 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 				}
 			}
 		}
-		result = append(result, tableReferenceLocations(candidateURI, candidateLexer, stmts, target)...)
+		result = append(result, tableReferenceLocations(
+			candidateURI,
+			candidateLexer,
+			stmts,
+			h.cteIndexLocked(candidatePath, candidateText),
+			target,
+		)...)
 	}
 	slices.SortFunc(result, compareLocations)
 	return result, nil
@@ -1137,17 +1156,29 @@ func compareLocations(a, b protocol.Location) int {
 	)
 }
 
-func tableReferenceLocations(uri protocol.DocumentURI, lex *sourceLexer, stmts []ast.Statement, target string) []protocol.Location {
+func tableReferenceLocations(
+	uri protocol.DocumentURI,
+	lex *sourceLexer,
+	stmts []ast.Statement,
+	ctes cteIndex,
+	target string,
+) []protocol.Location {
 	result := []protocol.Location{}
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.PathTableExpr:
 			if strings.EqualFold(pathName(n.Path), target) {
-				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Path)})
+				r := rangeByNode(lex, n.Path)
+				if !ctes.bindsReference(r) {
+					result = append(result, protocol.Location{URI: uri, Range: r})
+				}
 			}
 		case *ast.TableName:
 			if strings.EqualFold(identName(n.Table), target) {
-				result = append(result, protocol.Location{URI: uri, Range: rangeByNode(lex, n.Table)})
+				r := rangeByNode(lex, n.Table)
+				if !ctes.bindsReference(r) {
+					result = append(result, protocol.Location{URI: uri, Range: r})
+				}
 			}
 		}
 		return true
@@ -1158,10 +1189,12 @@ func tableReferenceLocations(uri protocol.DocumentURI, lex *sourceLexer, stmts [
 func (h *Handler) workspaceTableReferenceLocations(target string) []protocol.Location {
 	result := []protocol.Location{}
 	for path, stmts := range h.parsedMap {
+		text := string(h.fileToContentMap[path])
 		result = append(result, tableReferenceLocations(
 			protocol.URIFromPath(path),
-			newLexer(path, string(h.fileToContentMap[path])),
+			newLexer(path, text),
 			stmts,
+			h.cteIndexLocked(path, text),
 			target,
 		)...)
 	}
