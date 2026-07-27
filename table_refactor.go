@@ -182,6 +182,10 @@ func collectTableRefactorSites(lex *sourceLexer, stmts []ast.Statement, target s
 				if samePath(n.Name) && len(n.Synonyms) != 0 {
 					safe = false
 				}
+			case *ast.CreateView:
+				if samePath(n.Name) {
+					safe = false
+				}
 			case *ast.TableName:
 				if sameIdent(n.Table) && hasTargetCTE {
 					safe = false
@@ -271,24 +275,6 @@ func isTableIdentityBoundary(alteration ast.TableAlteration) bool {
 	default:
 		return false
 	}
-}
-
-func (h *Handler) hasSimpleTableDeclaration(name string) bool {
-	for _, stmts := range h.parsedMap {
-		found := false
-		memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-			table, ok := node.(*ast.CreateTable)
-			if ok && isSimplePath(table.Name) && strings.EqualFold(pathName(table.Name), name) {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found {
-			return true
-		}
-	}
-	return false
 }
 
 func (h *Handler) workspaceRootForPathLocked(path string) string {

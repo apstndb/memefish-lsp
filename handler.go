@@ -1521,6 +1521,14 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 		}, nil
 	}
 	lex := newLexer(path, text)
+	if symbol, ok := viewRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position); ok {
+		if _, ok := h.viewRefactorPlan(symbol.Name); ok {
+			return &protocol.PrepareRenameResult{
+				Range:       symbol.Range,
+				Placeholder: symbol.Name,
+			}, nil
+		}
+	}
 	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
@@ -1578,6 +1586,17 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 		}, nil
 	}
 	lex := newLexer(path, text)
+	if symbol, ok := viewRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position); ok {
+		if plan, ok := h.viewRefactorPlan(symbol.Name); ok {
+			if !strings.EqualFold(symbol.Name, params.NewName) && h.hasSimpleRelationDeclaration(params.NewName) {
+				return nil, fmt.Errorf("relation %q already exists", params.NewName)
+			}
+			changes := refactorPlanChanges(plan.Sites, params.NewName)
+			if len(changes) != 0 {
+				return &protocol.WorkspaceEdit{Changes: changes}, nil
+			}
+		}
+	}
 	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
@@ -1586,18 +1605,11 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 	if !ok {
 		return nil, nil
 	}
-	if !strings.EqualFold(symbol.Name, params.NewName) && h.hasSimpleTableDeclaration(params.NewName) {
-		return nil, fmt.Errorf("table %q already exists", params.NewName)
+	if !strings.EqualFold(symbol.Name, params.NewName) && h.hasSimpleRelationDeclaration(params.NewName) {
+		return nil, fmt.Errorf("relation %q already exists", params.NewName)
 	}
 
-	changes := make(map[protocol.DocumentURI][]protocol.TextEdit)
-	for candidatePath, sites := range plan.Sites {
-		edits := make([]protocol.TextEdit, 0, len(sites))
-		for _, site := range sites {
-			edits = append(edits, protocol.TextEdit{Range: site.Range, NewText: params.NewName})
-		}
-		changes[protocol.URIFromPath(candidatePath)] = edits
-	}
+	changes := refactorPlanChanges(plan.Sites, params.NewName)
 	if len(changes) == 0 {
 		return nil, nil
 	}
@@ -1605,6 +1617,18 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 	return &protocol.WorkspaceEdit{
 		Changes: changes,
 	}, nil
+}
+
+func refactorPlanChanges(sitesByPath map[string][]tableRefactorSite, newName string) map[protocol.DocumentURI][]protocol.TextEdit {
+	changes := make(map[protocol.DocumentURI][]protocol.TextEdit)
+	for path, sites := range sitesByPath {
+		edits := make([]protocol.TextEdit, 0, len(sites))
+		for _, site := range sites {
+			edits = append(edits, protocol.TextEdit{Range: site.Range, NewText: newName})
+		}
+		changes[protocol.URIFromPath(path)] = edits
+	}
+	return changes
 }
 
 func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.LinkedEditingRangeParams) (*protocol.LinkedEditingRanges, error) {
@@ -1648,6 +1672,22 @@ func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.Linke
 		}, nil
 	}
 	lex := newLexer(path, text)
+	if symbol, ok := viewRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position); ok {
+		if plan, ok := h.viewRefactorPlan(symbol.Name); ok {
+			var ranges []protocol.Range
+			for _, site := range plan.Sites[path] {
+				if site.Name == symbol.Name {
+					ranges = append(ranges, site.Range)
+				}
+			}
+			if len(ranges) >= 2 {
+				return &protocol.LinkedEditingRanges{
+					Ranges:      ranges,
+					WordPattern: "[A-Za-z_][A-Za-z0-9_]*",
+				}, nil
+			}
+		}
+	}
 	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
