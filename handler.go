@@ -1258,7 +1258,16 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 			}}, nil
 		}
 	}
-	if member, ok := aliases.memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
+	if member, ok := aliases.memberAtPosition(params.Position); ok {
+		if column, ok := member.binding.sourceCTE.column(member.name); ok {
+			return []protocol.Location{{
+				URI:   params.TextDocument.URI,
+				Range: column.name.selectionRange(),
+			}}, nil
+		}
+		if member.binding.sourceCTE != nil || member.binding.sourceTableName == "" {
+			return nil, nil
+		}
 		tableMatches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
 		viewMatches := h.viewColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
 		if len(tableMatches)+len(viewMatches) == 1 && len(tableMatches) == 1 {
@@ -1955,7 +1964,20 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 		return nil, nil
 	}
 	lex := newLexer(path, text)
-	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
+	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok {
+		if column, ok := member.binding.sourceCTE.column(member.name); ok {
+			return &protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind: protocol.Markdown,
+					Value: "**CTE column** `" + member.binding.sourceCTE.name + "." + member.name +
+						"`\n\n```sql\n" + column.sql + "\n```",
+				},
+				Range: member.range_,
+			}, nil
+		}
+		if member.binding.sourceCTE != nil || member.binding.sourceTableName == "" {
+			return nil, nil
+		}
 		tableMatches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
 		viewMatches := h.viewColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
 		if len(tableMatches)+len(viewMatches) != 1 {

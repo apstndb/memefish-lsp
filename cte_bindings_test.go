@@ -155,3 +155,92 @@ func TestCTEBindingDoesNotLeakAcrossStatements(t *testing.T) {
 		t.Fatalf("extractCTEIndex() = %#v, want only first-statement T reference", index)
 	}
 }
+
+func TestDefinitionResolvesCTEAliasColumns(t *testing.T) {
+	const text = `WITH LocalRows AS (
+  SELECT SingerId AS Id, Name FROM Singers
+)
+SELECT r.Id, r.Name FROM LocalRows AS r`
+	h := newParsedTestHandler(t, "/test.sql", text)
+	index := newTextIndex(text)
+
+	tests := []struct {
+		name              string
+		columnName        string
+		referenceOffset   int
+		declarationOffset int
+	}{
+		{
+			name:              "explicit",
+			columnName:        "Id",
+			referenceOffset:   strings.LastIndex(text, "r.Id") + len("r."),
+			declarationOffset: strings.Index(text, " AS Id") + len(" AS "),
+		},
+		{
+			name:              "implicit",
+			columnName:        "Name",
+			referenceOffset:   strings.LastIndex(text, "r.Name") + len("r."),
+			declarationOffset: strings.Index(text, "Name"),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := h.Definition(context.Background(), &protocol.DefinitionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+					Position:     index.position(test.referenceOffset),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := index.rangeByByteOffsets(
+				test.declarationOffset,
+				test.declarationOffset+len(test.columnName),
+			)
+			if len(got) != 1 || got[0].Range != want {
+				t.Fatalf("Definition() = %#v, want CTE column %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestHoverDescribesCTEAliasColumn(t *testing.T) {
+	const text = `WITH LocalRows AS (SELECT SingerId AS Id FROM Singers)
+SELECT r.Id FROM LocalRows AS r`
+	h := newParsedTestHandler(t, "/test.sql", text)
+	memberOffset := strings.LastIndex(text, "r.Id") + len("r.")
+
+	got, err := h.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(memberOffset),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !strings.Contains(got.Contents.Value, "**CTE column** `LocalRows.Id`") ||
+		!strings.Contains(got.Contents.Value, "SingerId AS Id") {
+		t.Fatalf("Hover() = %#v, want CTE output expression", got)
+	}
+}
+
+func TestCTEAliasColumnNavigationRejectsUnknownShape(t *testing.T) {
+	const text = `WITH LocalRows AS (SELECT * FROM Singers)
+SELECT r.Id FROM LocalRows AS r`
+	h := newParsedTestHandler(t, "/test.sql", text)
+
+	got, err := h.Definition(context.Background(), &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(strings.LastIndex(text, "r.Id") + len("r.")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Definition() = %#v, want none for SELECT * CTE shape", got)
+	}
+}

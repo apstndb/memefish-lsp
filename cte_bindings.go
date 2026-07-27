@@ -170,6 +170,18 @@ func (binding *cteBinding) highlights() []protocol.DocumentHighlight {
 	return result
 }
 
+func (binding *cteBinding) column(name string) (queryColumnFact, bool) {
+	if binding == nil || !binding.shapeKnown {
+		return queryColumnFact{}, false
+	}
+	for _, column := range binding.columns {
+		if strings.EqualFold(column.name.string(), name) {
+			return column, true
+		}
+	}
+	return queryColumnFact{}, false
+}
+
 func (h *Handler) cteIndexLocked(path, text string) cteIndex {
 	if snapshot := h.documents[path]; snapshot != nil {
 		return snapshot.ctes
