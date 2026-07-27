@@ -1295,11 +1295,11 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
 	lex := newLexer(path, text)
-	symbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position)
+	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
 	}
-	if len(h.tableDefinitionLocations(symbol.Name)) != 1 {
+	if _, ok := h.tableRefactorPlan(symbol.Name); !ok {
 		return nil, nil
 	}
 
@@ -1321,24 +1321,25 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 	path := uri.Path()
 	text := string(h.fileToContentMap[path])
 	lex := newLexer(path, text)
-	symbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position)
+	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
 	}
-	if len(h.tableDefinitionLocations(symbol.Name)) != 1 {
+	plan, ok := h.tableRefactorPlan(symbol.Name)
+	if !ok {
 		return nil, nil
 	}
-	if !strings.EqualFold(symbol.Name, params.NewName) && len(h.tableDefinitionLocations(params.NewName)) != 0 {
+	if !strings.EqualFold(symbol.Name, params.NewName) && h.hasSimpleTableDeclaration(params.NewName) {
 		return nil, fmt.Errorf("table %q already exists", params.NewName)
 	}
 
 	changes := make(map[protocol.DocumentURI][]protocol.TextEdit)
-	for candidatePath, stmts := range h.parsedMap {
-		candidateLexer := newLexer(candidatePath, string(h.fileToContentMap[candidatePath]))
-		edits := simpleTableRenameEdits(candidateLexer, stmts, symbol.Name, params.NewName)
-		if len(edits) != 0 {
-			changes[protocol.URIFromPath(candidatePath)] = edits
+	for candidatePath, sites := range plan.Sites {
+		edits := make([]protocol.TextEdit, 0, len(sites))
+		for _, site := range sites {
+			edits = append(edits, protocol.TextEdit{Range: site.Range, NewText: params.NewName})
 		}
+		changes[protocol.URIFromPath(candidatePath)] = edits
 	}
 	if len(changes) == 0 {
 		return nil, nil
@@ -1355,11 +1356,20 @@ func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.Linke
 
 	path := params.TextDocument.URI.Path()
 	lex := newLexer(path, string(h.fileToContentMap[path]))
-	symbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position)
+	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
 	}
-	ranges := simpleTableLinkedRanges(lex, h.parsedMap[path], symbol.Name)
+	plan, ok := h.tableRefactorPlan(symbol.Name)
+	if !ok {
+		return nil, nil
+	}
+	var ranges []protocol.Range
+	for _, site := range plan.Sites[path] {
+		if site.Name == symbol.Name {
+			ranges = append(ranges, site.Range)
+		}
+	}
 	if len(ranges) < 2 {
 		return nil, nil
 	}
@@ -1403,50 +1413,6 @@ func simpleTableSymbolAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos
 		return true
 	})
 	return result, result.Name != ""
-}
-
-func simpleTableRenameEdits(lex *memefish.Lexer, stmts []ast.Statement, oldName, newName string) []protocol.TextEdit {
-	var edits []protocol.TextEdit
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.CreateTable:
-			if isSimplePath(n.Name) && strings.EqualFold(pathName(n.Name), oldName) {
-				edits = append(edits, protocol.TextEdit{Range: rangeByNode(lex, n.Name), NewText: newName})
-			}
-		case *ast.PathTableExpr:
-			if isSimplePath(n.Path) && strings.EqualFold(pathName(n.Path), oldName) {
-				edits = append(edits, protocol.TextEdit{Range: rangeByNode(lex, n.Path), NewText: newName})
-			}
-		case *ast.TableName:
-			if strings.EqualFold(identName(n.Table), oldName) {
-				edits = append(edits, protocol.TextEdit{Range: rangeByNode(lex, n.Table), NewText: newName})
-			}
-		}
-		return true
-	})
-	return edits
-}
-
-func simpleTableLinkedRanges(lex *memefish.Lexer, stmts []ast.Statement, name string) []protocol.Range {
-	result := []protocol.Range{}
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.CreateTable:
-			if isSimplePath(n.Name) && pathName(n.Name) == name {
-				result = append(result, rangeByNode(lex, n.Name))
-			}
-		case *ast.PathTableExpr:
-			if isSimplePath(n.Path) && pathName(n.Path) == name {
-				result = append(result, rangeByNode(lex, n.Path))
-			}
-		case *ast.TableName:
-			if identName(n.Table) == name {
-				result = append(result, rangeByNode(lex, n.Table))
-			}
-		}
-		return true
-	})
-	return result
 }
 
 func isSimplePath(path *ast.Path) bool {
