@@ -272,3 +272,82 @@ func TestViewAliasColumnNavigationRejectsUnknownShape(t *testing.T) {
 		t.Fatalf("Definition() = %#v, want none for SELECT * view shape", got)
 	}
 }
+
+func TestDiagnosticReportsUnknownViewColumn(t *testing.T) {
+	const view = "CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS SELECT SingerId AS Id FROM Singers"
+	const query = "SELECT v.Name FROM ActiveSingers AS v"
+	h := newParsedTestHandler(t, "/schema.sql", view)
+	addParsedTestDocument(t, h, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 1 {
+		t.Fatalf("Diagnostic() items = %#v, want unknown view column", full.Items)
+	}
+	diagnostic := full.Items[0]
+	if diagnostic.Code != unknownColumnDiagnosticCode ||
+		!strings.Contains(diagnostic.Message, `view "ActiveSingers"`) {
+		t.Fatalf("Diagnostic() item = %#v, want unknown view-column error", diagnostic)
+	}
+	if len(diagnostic.RelatedInformation) != 1 ||
+		diagnostic.RelatedInformation[0].Location.URI != "file:///schema.sql" {
+		t.Fatalf("Diagnostic() related information = %#v, want view declaration", diagnostic.RelatedInformation)
+	}
+}
+
+func TestDiagnosticSkipsUnknownViewShape(t *testing.T) {
+	const query = "SELECT v.Name FROM ActiveSingers AS v"
+	h := newParsedTestHandler(t, "/schema.sql", activeSingersViewDDL)
+	addParsedTestDocument(t, h, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 0 {
+		t.Fatalf("Diagnostic() items = %#v, want none for SELECT * view shape", full.Items)
+	}
+}
+
+func TestDiagnosticResultChangesWithViewShape(t *testing.T) {
+	const query = "SELECT v.Name FROM ActiveSingers AS v"
+	h := newParsedTestHandler(t, "/schema.sql",
+		"CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS SELECT SingerId AS Id FROM Singers")
+	addParsedTestDocument(t, h, "/query.sql", query)
+
+	first, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstFull := first.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(firstFull.Items) != 1 {
+		t.Fatalf("first Diagnostic() items = %#v, want unknown Name", firstFull.Items)
+	}
+
+	addParsedTestDocument(t, h, "/schema.sql",
+		"CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS SELECT Name FROM Singers")
+	second, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument:     protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+		PreviousResultID: firstFull.ResultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondFull, ok := second.Value.(protocol.FullDocumentDiagnosticReport)
+	if !ok || len(secondFull.Items) != 0 {
+		t.Fatalf("second Diagnostic() = %#v, want full report without diagnostics", second.Value)
+	}
+	if secondFull.ResultID == firstFull.ResultID {
+		t.Fatalf("Diagnostic() result ID did not change after view update: %q", secondFull.ResultID)
+	}
+}

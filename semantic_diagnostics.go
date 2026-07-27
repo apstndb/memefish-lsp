@@ -19,6 +19,7 @@ type diagnosticSchemaColumn struct {
 
 type diagnosticSchemaTable struct {
 	Path    string
+	Kind    string
 	Name    string
 	Columns []diagnosticSchemaColumn
 }
@@ -42,7 +43,34 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			continue
 		}
 		tables := h.tableFactMatchesLocked(member.binding.sourceTableName)
-		if len(tables) != 1 || tableHasColumn(tables[0].table, member.name) {
+		views := h.viewFactMatchesLocked(member.binding.sourceTableName)
+		if len(tables)+len(views) != 1 {
+			continue
+		}
+		var (
+			kind             string
+			kindLabel        string
+			declarationURI   protocol.DocumentURI
+			declarationRange protocol.Range
+		)
+		switch {
+		case len(tables) == 1:
+			if tableHasColumn(tables[0].table, member.name) {
+				continue
+			}
+			kind = "table"
+			kindLabel = "Table"
+			declarationURI = tables[0].uri
+			declarationRange = tables[0].table.name.selectionRange()
+		case views[0].view.shapeKnown:
+			if viewHasColumn(views[0].view, member.name) {
+				continue
+			}
+			kind = "view"
+			kindLabel = "View"
+			declarationURI = views[0].uri
+			declarationRange = views[0].view.name.selectionRange()
+		default:
 			continue
 		}
 		result = append(result, protocol.Diagnostic{
@@ -51,16 +79,17 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			Code:     unknownColumnDiagnosticCode,
 			Source:   "memefish-lsp",
 			Message: fmt.Sprintf(
-				"Column %q does not exist in table %q.",
+				"Column %q does not exist in %s %q.",
 				member.name,
+				kind,
 				member.binding.sourceTableName,
 			),
 			RelatedInformation: []protocol.DiagnosticRelatedInformation{{
 				Location: protocol.Location{
-					URI:   tables[0].uri,
-					Range: tables[0].table.name.selectionRange(),
+					URI:   declarationURI,
+					Range: declarationRange,
 				},
-				Message: fmt.Sprintf("Table %q is declared here.", member.binding.sourceTableName),
+				Message: fmt.Sprintf("%s %q is declared here.", kindLabel, member.binding.sourceTableName),
 			}},
 		})
 	}
@@ -69,6 +98,15 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 
 func tableHasColumn(table tableFact, name string) bool {
 	for _, column := range table.columns {
+		if strings.EqualFold(column.name.string(), name) {
+			return true
+		}
+	}
+	return false
+}
+
+func viewHasColumn(view viewFact, name string) bool {
+	for _, column := range view.columns {
 		if strings.EqualFold(column.name.string(), name) {
 			return true
 		}
@@ -94,6 +132,7 @@ func (h *Handler) diagnosticSchemaFingerprintLocked() string {
 		for _, table := range facts.tables {
 			entry := diagnosticSchemaTable{
 				Path: path,
+				Kind: "table",
 				Name: table.name.string(),
 			}
 			for _, column := range table.columns {
@@ -105,6 +144,21 @@ func (h *Handler) diagnosticSchemaFingerprintLocked() string {
 					Name: column.name.string(),
 					Type: columnType,
 				})
+			}
+			schema = append(schema, entry)
+		}
+		for _, view := range facts.views {
+			entry := diagnosticSchemaTable{
+				Path: path,
+				Kind: "view",
+				Name: view.name.string(),
+			}
+			if view.shapeKnown {
+				for _, column := range view.columns {
+					entry.Columns = append(entry.Columns, diagnosticSchemaColumn{
+						Name: column.name.string(),
+					})
+				}
 			}
 			schema = append(schema, entry)
 		}

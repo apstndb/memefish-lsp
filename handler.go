@@ -964,8 +964,8 @@ func (h *Handler) aliasMemberCompletionItemsLocked(
 				Detail: detail,
 			})
 		}
-	} else if views[0].shapeKnown {
-		for _, column := range views[0].columns {
+	} else if views[0].view.shapeKnown {
+		for _, column := range views[0].view.columns {
 			name := column.name.string()
 			if !strings.HasPrefix(strings.ToUpper(name), strings.ToUpper(prefix)) {
 				continue
@@ -1887,8 +1887,13 @@ func (h *Handler) createTableMatches(name string) []*ast.CreateTable {
 	return result
 }
 
-func (h *Handler) viewFactMatchesLocked(name string) []viewFact {
-	var result []viewFact
+type viewFactMatch struct {
+	uri  protocol.DocumentURI
+	view viewFact
+}
+
+func (h *Handler) viewFactMatchesLocked(name string) []viewFactMatch {
+	var result []viewFactMatch
 	for path, content := range h.fileToContentMap {
 		var facts documentFacts
 		if snapshot := h.documents[path]; snapshot != nil {
@@ -1898,7 +1903,10 @@ func (h *Handler) viewFactMatchesLocked(name string) []viewFact {
 		}
 		for _, view := range facts.views {
 			if strings.EqualFold(view.name.string(), name) {
-				result = append(result, view)
+				result = append(result, viewFactMatch{
+					uri:  protocol.URIFromPath(path),
+					view: view,
+				})
 			}
 		}
 	}
@@ -1956,7 +1964,7 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
-					Value: "**View** `" + relation.Name + "`\n\n```sql\n" + viewMatches[0].sql + "\n```",
+					Value: "**View** `" + relation.Name + "`\n\n```sql\n" + viewMatches[0].view.sql + "\n```",
 				},
 				Range: relation.Range,
 			}, nil
