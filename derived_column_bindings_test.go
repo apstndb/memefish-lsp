@@ -97,3 +97,110 @@ func TestDocumentSnapshotStoresDerivedColumnIndex(t *testing.T) {
 		t.Fatalf("snapshot derived columns = %#v, want Id declaration and consumer", snapshot.derivedColumns)
 	}
 }
+
+func TestRenameExplicitDerivedColumn(t *testing.T) {
+	const text = `SELECT d.Id
+FROM (
+  SELECT SingerId AS Id FROM Singers GROUP BY Id
+) AS d`
+	h := newParsedTestHandler(t, "/test.sql", text)
+	position := newTextIndex(text).position(strings.Index(text, "d.Id") + len("d."))
+
+	prepared, err := h.PrepareRename(context.Background(), &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared == nil || prepared.Placeholder != "Id" {
+		t.Fatalf("PrepareRename() = %#v, want explicit derived column Id", prepared)
+	}
+
+	renamed, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+		NewName: "ArtistId",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edits := renamed.Changes["file:///test.sql"]
+	if len(edits) != 3 {
+		t.Fatalf("Rename() edits = %#v, want declaration, GROUP BY, and consumer", edits)
+	}
+	for _, edit := range edits {
+		if edit.NewText != "ArtistId" {
+			t.Fatalf("Rename() edit = %#v, want ArtistId", edit)
+		}
+	}
+
+	linked, err := h.LinkedEditingRange(context.Background(), &protocol.LinkedEditingRangeParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked == nil || len(linked.Ranges) != 3 {
+		t.Fatalf("LinkedEditingRange() = %#v, want three derived-column ranges", linked)
+	}
+}
+
+func TestRenameRejectsImplicitDerivedColumn(t *testing.T) {
+	const text = "SELECT d.SingerId FROM (SELECT SingerId FROM Singers) AS d"
+	h := newParsedTestHandler(t, "/test.sql", text)
+	position := newTextIndex(text).position(strings.Index(text, "d.SingerId") + len("d."))
+
+	prepared, err := h.PrepareRename(context.Background(), &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared != nil {
+		t.Fatalf("PrepareRename() = %#v, want nil for implicit derived column", prepared)
+	}
+
+	renamed, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+		NewName: "ArtistId",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed != nil {
+		t.Fatalf("Rename() = %#v, want nil for implicit derived column", renamed)
+	}
+}
+
+func TestRenameRejectsDerivedColumnConflict(t *testing.T) {
+	const text = `SELECT d.Id
+FROM (SELECT SingerId AS Id, Name AS Label FROM Singers) AS d`
+	h := newParsedTestHandler(t, "/test.sql", text)
+
+	got, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position: newTextIndex(text).position(
+				strings.Index(text, "d.Id") + len("d."),
+			),
+		},
+		NewName: "Label",
+	})
+	if err == nil || got != nil {
+		t.Fatalf("Rename() = %#v, %v; want derived column conflict error", got, err)
+	}
+}

@@ -11,6 +11,8 @@ type derivedColumnBinding struct {
 	name             string
 	declarationRange protocol.Range
 	referenceRanges  []protocol.Range
+	scope            map[string]*derivedColumnBinding
+	explicit         bool
 }
 
 type derivedColumnSite struct {
@@ -34,11 +36,15 @@ func extractDerivedColumnIndex(
 			alias.sourceCTE != nil || alias.sourceTableName != "" {
 			continue
 		}
+		scope := make(map[string]*derivedColumnBinding, len(alias.sourceColumns))
 		for _, column := range alias.sourceColumns {
 			binding := &derivedColumnBinding{
 				name:             column.name.string(),
 				declarationRange: column.name.selectionRange(),
+				scope:            scope,
+				explicit:         column.explicit,
 			}
+			scope[strings.ToUpper(binding.name)] = binding
 			result.bindings = append(result.bindings, binding)
 			result.sites = append(result.sites, derivedColumnSite{
 				binding:     binding,
@@ -111,6 +117,26 @@ func (binding *derivedColumnBinding) highlights() []protocol.DocumentHighlight {
 		result = append(result, protocol.DocumentHighlight{
 			Range: referenceRange,
 			Kind:  protocol.Read,
+		})
+	}
+	return result
+}
+
+func (binding *derivedColumnBinding) renameConflicts(newName string) bool {
+	existing := binding.scope[strings.ToUpper(newName)]
+	return existing != nil && existing != binding
+}
+
+func (binding *derivedColumnBinding) edits(newName string) []protocol.TextEdit {
+	result := make([]protocol.TextEdit, 0, len(binding.referenceRanges)+1)
+	result = append(result, protocol.TextEdit{
+		Range:   binding.declarationRange,
+		NewText: newName,
+	})
+	for _, referenceRange := range binding.referenceRanges {
+		result = append(result, protocol.TextEdit{
+			Range:   referenceRange,
+			NewText: newName,
 		})
 	}
 	return result
