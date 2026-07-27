@@ -520,13 +520,13 @@ func TestDiagnosticUnknownColumnResultChangesWithSchema(t *testing.T) {
 	}
 }
 
-func TestDiagnosticSkipsUnresolvedAndCTEBackedTables(t *testing.T) {
+func TestDiagnosticSkipsUnresolvedAndUnknownCTEShapes(t *testing.T) {
 	tests := []struct {
 		name  string
 		query string
 	}{
 		{name: "unresolved table", query: "SELECT s.UnknownColumn FROM RemoteTable AS s"},
-		{name: "CTE", query: "WITH LocalRows AS (SELECT 1 AS Id) SELECT r.UnknownColumn FROM LocalRows AS r"},
+		{name: "unknown CTE shape", query: "WITH LocalRows AS (SELECT * FROM Singers) SELECT r.UnknownColumn FROM LocalRows AS r"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -539,9 +539,34 @@ func TestDiagnosticSkipsUnresolvedAndCTEBackedTables(t *testing.T) {
 			}
 			full := got.Value.(protocol.FullDocumentDiagnosticReport)
 			if len(full.Items) != 0 {
-				t.Fatalf("Diagnostic() items = %#v, want none without a unique physical table shape", full.Items)
+				t.Fatalf("Diagnostic() items = %#v, want none without a known source shape", full.Items)
 			}
 		})
+	}
+}
+
+func TestDiagnosticReportsUnknownCTEColumn(t *testing.T) {
+	const query = "WITH LocalRows AS (SELECT 1 AS Id) SELECT r.UnknownColumn FROM LocalRows AS r"
+	h := newParsedTestHandler(t, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 1 {
+		t.Fatalf("Diagnostic() items = %#v, want unknown CTE column", full.Items)
+	}
+	diagnostic := full.Items[0]
+	if diagnostic.Code != unknownColumnDiagnosticCode ||
+		!strings.Contains(diagnostic.Message, `cte "LocalRows"`) {
+		t.Fatalf("Diagnostic() item = %#v, want unknown CTE-column error", diagnostic)
+	}
+	if len(diagnostic.RelatedInformation) != 1 ||
+		diagnostic.RelatedInformation[0].Location.URI != "file:///query.sql" {
+		t.Fatalf("Diagnostic() related information = %#v, want local CTE declaration", diagnostic.RelatedInformation)
 	}
 }
 

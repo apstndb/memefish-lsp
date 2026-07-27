@@ -38,8 +38,26 @@ func (h *Handler) documentDiagnosticStateLocked(snapshot *documentSnapshot) ([]p
 func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protocol.Diagnostic {
 	var result []protocol.Diagnostic
 	for _, member := range snapshot.aliases.memberSites {
-		if member.binding.sourceTableName == "" ||
-			snapshot.selectAliases.ambiguousAtPosition(member.range_.Start) {
+		if snapshot.selectAliases.ambiguousAtPosition(member.range_.Start) {
+			continue
+		}
+		if member.binding.sourceCTE != nil {
+			if !member.binding.sourceCTE.shapeKnown {
+				continue
+			}
+			if _, ok := member.binding.sourceCTE.column(member.name); ok {
+				continue
+			}
+			result = append(result, unknownAliasedColumnDiagnostic(
+				member,
+				"CTE",
+				member.binding.sourceCTE.name,
+				protocol.URIFromPath(snapshot.path),
+				member.binding.sourceCTE.declarationRange,
+			))
+			continue
+		}
+		if member.binding.sourceTableName == "" {
 			continue
 		}
 		tables := h.tableFactMatchesLocked(member.binding.sourceTableName)
@@ -48,7 +66,6 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			continue
 		}
 		var (
-			kind             string
 			kindLabel        string
 			declarationURI   protocol.DocumentURI
 			declarationRange protocol.Range
@@ -58,7 +75,6 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			if tableHasColumn(tables[0].table, member.name) {
 				continue
 			}
-			kind = "table"
 			kindLabel = "Table"
 			declarationURI = tables[0].uri
 			declarationRange = tables[0].table.name.selectionRange()
@@ -66,34 +82,48 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			if viewHasColumn(views[0].view, member.name) {
 				continue
 			}
-			kind = "view"
 			kindLabel = "View"
 			declarationURI = views[0].uri
 			declarationRange = views[0].view.name.selectionRange()
 		default:
 			continue
 		}
-		result = append(result, protocol.Diagnostic{
-			Range:    member.range_,
-			Severity: protocol.SeverityError,
-			Code:     unknownColumnDiagnosticCode,
-			Source:   "memefish-lsp",
-			Message: fmt.Sprintf(
-				"Column %q does not exist in %s %q.",
-				member.name,
-				kind,
-				member.binding.sourceTableName,
-			),
-			RelatedInformation: []protocol.DiagnosticRelatedInformation{{
-				Location: protocol.Location{
-					URI:   declarationURI,
-					Range: declarationRange,
-				},
-				Message: fmt.Sprintf("%s %q is declared here.", kindLabel, member.binding.sourceTableName),
-			}},
-		})
+		result = append(result, unknownAliasedColumnDiagnostic(
+			member,
+			kindLabel,
+			member.binding.sourceTableName,
+			declarationURI,
+			declarationRange,
+		))
 	}
 	return result
+}
+
+func unknownAliasedColumnDiagnostic(
+	member aliasMemberSite,
+	kind, sourceName string,
+	declarationURI protocol.DocumentURI,
+	declarationRange protocol.Range,
+) protocol.Diagnostic {
+	return protocol.Diagnostic{
+		Range:    member.range_,
+		Severity: protocol.SeverityError,
+		Code:     unknownColumnDiagnosticCode,
+		Source:   "memefish-lsp",
+		Message: fmt.Sprintf(
+			"Column %q does not exist in %s %q.",
+			member.name,
+			strings.ToLower(kind),
+			sourceName,
+		),
+		RelatedInformation: []protocol.DiagnosticRelatedInformation{{
+			Location: protocol.Location{
+				URI:   declarationURI,
+				Range: declarationRange,
+			},
+			Message: fmt.Sprintf("%s %q is declared here.", kind, sourceName),
+		}},
+	}
 }
 
 func tableHasColumn(table tableFact, name string) bool {
