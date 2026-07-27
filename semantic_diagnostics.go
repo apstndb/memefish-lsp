@@ -18,6 +18,7 @@ import (
 const (
 	unknownColumnDiagnosticCode        = "unknown-column"
 	invalidSelectOrdinalDiagnosticCode = "invalid-select-ordinal"
+	duplicateCTEDiagnosticCode         = "duplicate-cte"
 )
 
 type diagnosticSchemaColumn struct {
@@ -45,6 +46,7 @@ func (h *Handler) documentDiagnosticStateLocked(snapshot *documentSnapshot) ([]p
 
 func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protocol.Diagnostic {
 	result := selectOrdinalDiagnostics(snapshot)
+	result = append(result, duplicateCTEDiagnostics(snapshot)...)
 	for _, member := range snapshot.aliases.memberSites {
 		if snapshot.selectAliases.ambiguousAtPosition(member.range_.Start) {
 			continue
@@ -123,6 +125,42 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			comparePosition(a.Range.End, b.Range.End),
 			strings.Compare(fmt.Sprint(a.Code), fmt.Sprint(b.Code)),
 		)
+	})
+	return result
+}
+
+func duplicateCTEDiagnostics(snapshot *documentSnapshot) []protocol.Diagnostic {
+	var result []protocol.Diagnostic
+	memewalk.InspectSlice(snapshot.statements, func(path []string, node ast.Node) bool {
+		query, ok := node.(*ast.Query)
+		if !ok || query.With == nil {
+			return true
+		}
+		seen := make(map[string]*ast.Ident, len(query.With.CTEs))
+		for _, cte := range query.With.CTEs {
+			name := identName(cte.Name)
+			key := strings.ToUpper(name)
+			first := seen[key]
+			if first == nil {
+				seen[key] = cte.Name
+				continue
+			}
+			result = append(result, protocol.Diagnostic{
+				Range:    nodeRange(snapshot.index, cte.Name),
+				Severity: protocol.SeverityError,
+				Code:     duplicateCTEDiagnosticCode,
+				Source:   "memefish-lsp",
+				Message:  fmt.Sprintf("CTE %q is declared more than once in the same WITH clause.", name),
+				RelatedInformation: []protocol.DiagnosticRelatedInformation{{
+					Location: protocol.Location{
+						URI:   protocol.URIFromPath(snapshot.path),
+						Range: nodeRange(snapshot.index, first),
+					},
+					Message: fmt.Sprintf("CTE %q was first declared here.", identName(first)),
+				}},
+			})
+		}
+		return true
 	})
 	return result
 }
