@@ -97,3 +97,113 @@ SELECT r.Id FROM LocalRows AS r`
 		t.Fatalf("snapshot CTE columns = %#v, want Id declaration and consumer", snapshot.cteColumns)
 	}
 }
+
+func TestRenameExplicitCTEColumn(t *testing.T) {
+	const text = `WITH LocalRows AS (
+  SELECT SingerId AS Id FROM Singers GROUP BY Id
+)
+SELECT r.Id FROM LocalRows AS r`
+	h := newParsedTestHandler(t, "/test.sql", text)
+	position := newTextIndex(text).position(strings.LastIndex(text, "r.Id") + len("r."))
+
+	prepared, err := h.PrepareRename(context.Background(), &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared == nil || prepared.Placeholder != "Id" {
+		t.Fatalf("PrepareRename() = %#v, want explicit CTE column Id", prepared)
+	}
+
+	renamed, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+		NewName: "ArtistId",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edits := renamed.Changes["file:///test.sql"]
+	if len(edits) != 3 {
+		t.Fatalf("Rename() edits = %#v, want declaration, GROUP BY, and consumer", edits)
+	}
+	for _, edit := range edits {
+		if edit.NewText != "ArtistId" {
+			t.Fatalf("Rename() edit = %#v, want ArtistId", edit)
+		}
+	}
+
+	linked, err := h.LinkedEditingRange(context.Background(), &protocol.LinkedEditingRangeParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked == nil || len(linked.Ranges) != 3 {
+		t.Fatalf("LinkedEditingRange() = %#v, want three CTE-column ranges", linked)
+	}
+}
+
+func TestRenameRejectsImplicitCTEColumn(t *testing.T) {
+	const text = `WITH LocalRows AS (SELECT SingerId FROM Singers)
+SELECT r.SingerId FROM LocalRows AS r`
+	h := newParsedTestHandler(t, "/test.sql", text)
+	position := newTextIndex(text).position(strings.LastIndex(text, "r.SingerId") + len("r."))
+
+	prepared, err := h.PrepareRename(context.Background(), &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared != nil {
+		t.Fatalf("PrepareRename() = %#v, want nil for implicit CTE column", prepared)
+	}
+
+	renamed, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     position,
+		},
+		NewName: "ArtistId",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed != nil {
+		t.Fatalf("Rename() = %#v, want nil for implicit CTE column", renamed)
+	}
+}
+
+func TestRenameRejectsCTEColumnConflict(t *testing.T) {
+	const text = `WITH LocalRows AS (
+  SELECT SingerId AS Id, Name AS Label FROM Singers
+)
+SELECT r.Id FROM LocalRows AS r`
+	h := newParsedTestHandler(t, "/test.sql", text)
+
+	got, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position: newTextIndex(text).position(
+				strings.LastIndex(text, "r.Id") + len("r."),
+			),
+		},
+		NewName: "Label",
+	})
+	if err == nil || got != nil {
+		t.Fatalf("Rename() = %#v, %v; want CTE column conflict error", got, err)
+	}
+}

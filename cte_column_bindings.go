@@ -11,6 +11,8 @@ type cteColumnBinding struct {
 	name             string
 	declarationRange protocol.Range
 	referenceRanges  []protocol.Range
+	scope            map[string]*cteColumnBinding
+	explicit         bool
 }
 
 type cteColumnSite struct {
@@ -34,11 +36,15 @@ func extractCTEColumnIndex(
 		if !cte.shapeKnown {
 			continue
 		}
+		scope := make(map[string]*cteColumnBinding, len(cte.columns))
 		for _, column := range cte.columns {
 			binding := &cteColumnBinding{
 				name:             column.name.string(),
 				declarationRange: column.name.selectionRange(),
+				scope:            scope,
+				explicit:         column.explicit,
 			}
+			scope[strings.ToUpper(binding.name)] = binding
 			result.bindings = append(result.bindings, binding)
 			result.sites = append(result.sites, cteColumnSite{
 				binding:     binding,
@@ -111,6 +117,26 @@ func (binding *cteColumnBinding) highlights() []protocol.DocumentHighlight {
 		result = append(result, protocol.DocumentHighlight{
 			Range: referenceRange,
 			Kind:  protocol.Read,
+		})
+	}
+	return result
+}
+
+func (binding *cteColumnBinding) renameConflicts(newName string) bool {
+	existing := binding.scope[strings.ToUpper(newName)]
+	return existing != nil && existing != binding
+}
+
+func (binding *cteColumnBinding) edits(newName string) []protocol.TextEdit {
+	result := make([]protocol.TextEdit, 0, len(binding.referenceRanges)+1)
+	result = append(result, protocol.TextEdit{
+		Range:   binding.declarationRange,
+		NewText: newName,
+	})
+	for _, referenceRange := range binding.referenceRanges {
+		result = append(result, protocol.TextEdit{
+			Range:   referenceRange,
+			NewText: newName,
 		})
 	}
 	return result

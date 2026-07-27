@@ -57,8 +57,9 @@ type viewFact struct {
 }
 
 type queryColumnFact struct {
-	name ddlName
-	sql  string
+	name     ddlName
+	sql      string
+	explicit bool
 }
 
 type ddlSymbolFact struct {
@@ -168,7 +169,7 @@ func extractQueryColumnFacts(index textIndex, query ast.QueryExpr) ([]queryColum
 	seen := make(map[string]struct{})
 	columns := make([]queryColumnFact, 0, len(selectExpr.Results))
 	for _, item := range selectExpr.Results {
-		ident, _ := selectItemAlias(item)
+		ident, explicit := selectItemAlias(item)
 		if ident == nil {
 			return nil, false
 		}
@@ -179,8 +180,9 @@ func extractQueryColumnFacts(index textIndex, query ast.QueryExpr) ([]queryColum
 		}
 		seen[key] = struct{}{}
 		columns = append(columns, queryColumnFact{
-			name: ddlNameFromIdent(index, ident),
-			sql:  item.SQL(),
+			name:     ddlNameFromIdent(index, ident),
+			sql:      item.SQL(),
+			explicit: explicit,
 		})
 	}
 	return columns, true

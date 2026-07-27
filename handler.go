@@ -1580,6 +1580,15 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 			Placeholder: site.binding.name,
 		}, nil
 	}
+	if site, ok := h.cteColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if !site.binding.explicit {
+			return nil, nil
+		}
+		return &protocol.PrepareRenameResult{
+			Range:       site.range_,
+			Placeholder: site.binding.name,
+		}, nil
+	}
 	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous || !site.binding.explicit {
 			return nil, nil
@@ -1634,6 +1643,19 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 		}
 		if aliases.renameConflicts(site.binding, params.NewName) {
 			return nil, fmt.Errorf("table alias %q already exists", params.NewName)
+		}
+		return &protocol.WorkspaceEdit{
+			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+				uri: site.binding.edits(params.NewName),
+			},
+		}, nil
+	}
+	if site, ok := h.cteColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if !site.binding.explicit {
+			return nil, nil
+		}
+		if site.binding.renameConflicts(params.NewName) {
+			return nil, fmt.Errorf("CTE column %q already exists", params.NewName)
 		}
 		return &protocol.WorkspaceEdit{
 			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
@@ -1712,6 +1734,21 @@ func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.Linke
 	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
+			return nil, nil
+		}
+		ranges := make([]protocol.Range, 0, len(site.binding.referenceRanges)+1)
+		ranges = append(ranges, site.binding.declarationRange)
+		ranges = append(ranges, site.binding.referenceRanges...)
+		if len(ranges) < 2 {
+			return nil, nil
+		}
+		return &protocol.LinkedEditingRanges{
+			Ranges:      ranges,
+			WordPattern: "[A-Za-z_][A-Za-z0-9_]*",
+		}, nil
+	}
+	if site, ok := h.cteColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if !site.binding.explicit {
 			return nil, nil
 		}
 		ranges := make([]protocol.Range, 0, len(site.binding.referenceRanges)+1)
