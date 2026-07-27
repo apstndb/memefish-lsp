@@ -48,6 +48,12 @@ type tableFact struct {
 	columns          []tableColumnFact
 }
 
+type viewFact struct {
+	name             ddlName
+	sql              string
+	declarationRange protocol.Range
+}
+
 type ddlSymbolFact struct {
 	name             ddlName
 	kind             protocol.SymbolKind
@@ -59,6 +65,7 @@ type ddlSymbolFact struct {
 type documentFacts struct {
 	symbols []ddlSymbolFact
 	tables  []tableFact
+	views   []viewFact
 }
 
 func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts {
@@ -114,7 +121,14 @@ func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts 
 		case *ast.CreateSequence:
 			add(node, ddlNameFromPath(index, node.Name), protocol.Object, "")
 		case *ast.CreateView:
-			add(node, ddlNameFromPath(index, node.Name), protocol.Object, "")
+			name := ddlNameFromPath(index, node.Name)
+			if add(node, name, protocol.Object, "") != nil {
+				facts.views = append(facts.views, viewFact{
+					name:             name,
+					sql:              node.SQL(),
+					declarationRange: nodeRange(index, node),
+				})
+			}
 		case *ast.CreateIndex:
 			add(node, ddlNameFromPath(index, node.Name), protocol.Key, pathName(node.TableName))
 		case *ast.CreateVectorIndex:

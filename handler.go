@@ -1222,23 +1222,37 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 		return nil, nil
 	}
 	lex := newLexer(path, text)
-	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
+	target, ok := relationNameAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
 	}
 
-	return h.tableDefinitionLocations(target), nil
+	return h.relationDefinitionLocationsLocked(target), nil
 }
 
-func (h *Handler) tableDefinitionLocations(target string) []protocol.Location {
+func (h *Handler) relationDefinitionLocationsLocked(target string) []protocol.Location {
 	result := []protocol.Location{}
-	for path, stmts := range h.parsedMap {
-		lex := newLexer(path, string(h.fileToContentMap[path]))
-		for _, def := range tableDefinitions(stmts) {
-			if strings.EqualFold(pathName(def.Name), target) {
+	for path, content := range h.fileToContentMap {
+		var facts documentFacts
+		if snapshot := h.documents[path]; snapshot != nil {
+			facts = snapshot.facts
+		} else {
+			facts = extractDDLFacts(newTextIndex(string(content)), h.parsedMap[path])
+		}
+		uri := protocol.URIFromPath(path)
+		for _, table := range facts.tables {
+			if strings.EqualFold(table.name.string(), target) {
 				result = append(result, protocol.Location{
-					URI:   protocol.URIFromPath(path),
-					Range: rangeByNode(lex, def.Name),
+					URI:   uri,
+					Range: table.name.selectionRange(),
+				})
+			}
+		}
+		for _, view := range facts.views {
+			if strings.EqualFold(view.name.string(), target) {
+				result = append(result, protocol.Location{
+					URI:   uri,
+					Range: view.name.selectionRange(),
 				})
 			}
 		}
@@ -1327,28 +1341,25 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
 	}
 	lex := newLexer(path, text)
-	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
+	target, ok := relationNameAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
 	}
 
-	if len(h.tableDefinitionLocations(target)) == 0 {
+	definitions := h.relationDefinitionLocationsLocked(target)
+	if len(definitions) == 0 {
 		return nil, nil
 	}
 
 	result := []protocol.Location{}
+	if params.Context.IncludeDeclaration {
+		result = append(result, definitions...)
+	}
 	for candidatePath, stmts := range h.parsedMap {
 		candidateURI := protocol.URIFromPath(candidatePath)
 		candidateText := string(h.fileToContentMap[candidatePath])
 		candidateLexer := newLexer(candidatePath, candidateText)
-		if params.Context.IncludeDeclaration {
-			for _, def := range tableDefinitions(stmts) {
-				if strings.EqualFold(pathName(def.Name), target) {
-					result = append(result, protocol.Location{URI: candidateURI, Range: rangeByNode(candidateLexer, def.Name)})
-				}
-			}
-		}
-		result = append(result, tableReferenceLocations(
+		result = append(result, relationReferenceLocations(
 			candidateURI,
 			candidateLexer,
 			stmts,
@@ -1368,7 +1379,7 @@ func compareLocations(a, b protocol.Location) int {
 	)
 }
 
-func tableReferenceLocations(
+func relationReferenceLocations(
 	uri protocol.DocumentURI,
 	lex *sourceLexer,
 	stmts []ast.Statement,
@@ -1398,11 +1409,11 @@ func tableReferenceLocations(
 	return result
 }
 
-func (h *Handler) workspaceTableReferenceLocations(target string) []protocol.Location {
+func (h *Handler) workspaceRelationReferenceLocations(target string) []protocol.Location {
 	result := []protocol.Location{}
 	for path, stmts := range h.parsedMap {
 		text := string(h.fileToContentMap[path])
-		result = append(result, tableReferenceLocations(
+		result = append(result, relationReferenceLocations(
 			protocol.URIFromPath(path),
 			newLexer(path, text),
 			stmts,
@@ -1424,11 +1435,19 @@ func (h *Handler) CodeLens(_ context.Context, params *protocol.CodeLensParams) (
 	lex := newLexer(path, string(h.fileToContentMap[path]))
 	result := []protocol.CodeLens{}
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-		table, ok := node.(*ast.CreateTable)
-		if !ok || !isSimplePath(table.Name) {
+		var name *ast.Path
+		switch declaration := node.(type) {
+		case *ast.CreateTable:
+			name = declaration.Name
+		case *ast.CreateView:
+			name = declaration.Name
+		default:
 			return true
 		}
-		references := h.workspaceTableReferenceLocations(pathName(table.Name))
+		if !isSimplePath(name) {
+			return false
+		}
+		references := h.workspaceRelationReferenceLocations(pathName(name))
 		if len(references) == 0 {
 			return false
 		}
@@ -1436,7 +1455,7 @@ func (h *Handler) CodeLens(_ context.Context, params *protocol.CodeLensParams) (
 		if err != nil {
 			return false
 		}
-		nameRange := rangeByNode(lex, table.Name)
+		nameRange := rangeByNode(lex, name)
 		result = append(result, protocol.CodeLens{
 			Range: protocol.Range{Start: nameRange.Start, End: nameRange.Start},
 			Command: &protocol.Command{
@@ -1657,7 +1676,7 @@ type tableSymbol struct {
 	Range protocol.Range
 }
 
-func simpleTableSymbolAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
+func simpleRelationSymbolAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
 	var result tableSymbol
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
 		if result.Name != "" {
@@ -1665,6 +1684,12 @@ func simpleTableSymbolAtPosition(lex *sourceLexer, stmts []ast.Statement, pos pr
 		}
 		switch n := node.(type) {
 		case *ast.CreateTable:
+			if !isSimplePath(n.Name) || !include(lex, positionByNode(lex, n.Name), pos) {
+				return true
+			}
+			result = tableSymbol{Name: pathName(n.Name), Range: rangeByNode(lex, n.Name)}
+			return false
+		case *ast.CreateView:
 			if !isSimplePath(n.Name) || !include(lex, positionByNode(lex, n.Name), pos) {
 				return true
 			}
@@ -1707,7 +1732,7 @@ func isUnquotedIdentifier(s string) bool {
 	return true
 }
 
-func tableNameAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (string, bool) {
+func relationNameAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (string, bool) {
 	var result string
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
 		if result != "" {
@@ -1715,6 +1740,11 @@ func tableNameAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.P
 		}
 		switch n := node.(type) {
 		case *ast.CreateTable:
+			if include(lex, positionByNode(lex, n.Name), pos) {
+				result = pathName(n.Name)
+				return false
+			}
+		case *ast.CreateView:
 			if include(lex, positionByNode(lex, n.Name), pos) {
 				result = pathName(n.Name)
 				return false
@@ -1733,17 +1763,6 @@ func tableNameAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.P
 		return true
 	})
 	return result, result != ""
-}
-
-func tableDefinitions(stmts []ast.Statement) map[string]*ast.CreateTable {
-	result := make(map[string]*ast.CreateTable)
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-		if n, ok := node.(*ast.CreateTable); ok {
-			result[strings.ToUpper(pathName(n.Name))] = n
-		}
-		return true
-	})
-	return result
 }
 
 func pathName(path *ast.Path) string {
@@ -1806,6 +1825,24 @@ func (h *Handler) createTableMatches(name string) []*ast.CreateTable {
 	return result
 }
 
+func (h *Handler) viewFactMatchesLocked(name string) []viewFact {
+	var result []viewFact
+	for path, content := range h.fileToContentMap {
+		var facts documentFacts
+		if snapshot := h.documents[path]; snapshot != nil {
+			facts = snapshot.facts
+		} else {
+			facts = extractDDLFacts(newTextIndex(string(content)), h.parsedMap[path])
+		}
+		for _, view := range facts.views {
+			if strings.EqualFold(view.name.string(), name) {
+				result = append(result, view)
+			}
+		}
+	}
+	return result
+}
+
 func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (result *protocol.Hover, err error) {
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
@@ -1831,15 +1868,25 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 			Range: member.range_,
 		}, nil
 	}
-	if tableSymbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position); ok {
-		matches := h.createTableMatches(tableSymbol.Name)
-		if len(matches) == 1 {
+	if relation, ok := simpleRelationSymbolAtPosition(lex, h.parsedMap[path], params.Position); ok {
+		tableMatches := h.createTableMatches(relation.Name)
+		viewMatches := h.viewFactMatchesLocked(relation.Name)
+		if len(tableMatches)+len(viewMatches) == 1 && len(tableMatches) == 1 {
 			return &protocol.Hover{
 				Contents: protocol.MarkupContent{
 					Kind:  protocol.Markdown,
-					Value: "**Table** `" + tableSymbol.Name + "`\n\n```sql\n" + matches[0].SQL() + "\n```",
+					Value: "**Table** `" + relation.Name + "`\n\n```sql\n" + tableMatches[0].SQL() + "\n```",
 				},
-				Range: tableSymbol.Range,
+				Range: relation.Range,
+			}, nil
+		}
+		if len(tableMatches)+len(viewMatches) == 1 && len(viewMatches) == 1 {
+			return &protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.Markdown,
+					Value: "**View** `" + relation.Name + "`\n\n```sql\n" + viewMatches[0].sql + "\n```",
+				},
+				Range: relation.Range,
 			}, nil
 		}
 	}
