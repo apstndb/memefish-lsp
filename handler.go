@@ -83,6 +83,9 @@ type Handler struct {
 	importPaths                   []string
 	client                        protocol.Client
 	fileContentMu                 sync.Mutex
+	diagnosticPublishMu           sync.Mutex
+	documents                     map[string]*documentSnapshot
+	documentRevisions             map[string]uint64
 	fileToContentMap              map[string][]byte
 	parsedMap                     map[string][]ast.Statement
 	openDocumentMap               map[string]struct{}
@@ -1868,28 +1871,37 @@ func filterSemanticTokens(tokens *protocol.SemanticTokens, target protocol.Range
 }
 
 func (h *Handler) DidChange(ctx context.Context, params *protocol.DidChangeTextDocumentParams) (err error) {
-	err = h.parse(ctx, params.TextDocument.URI, params.ContentChanges[len(params.ContentChanges)-1].Text)
-	return err
+	if len(params.ContentChanges) == 0 {
+		return nil
+	}
+	return h.updateDocument(
+		ctx,
+		params.TextDocument.URI,
+		params.ContentChanges[len(params.ContentChanges)-1].Text,
+		params.TextDocument.Version,
+		func(origin documentOrigin) documentOrigin { return origin | documentOriginOpen },
+	)
 }
 
 func (h *Handler) Diagnostic(ctx context.Context, params *protocol.DocumentDiagnosticParams) (*protocol.DocumentDiagnosticReport, error) {
 	h.fileContentMu.Lock()
-	defer h.fileContentMu.Unlock()
-
 	path := params.TextDocument.URI.Path()
+	snapshot := h.documents[path]
 	text := string(h.fileToContentMap[path])
-	resultID := fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
-	if params.PreviousResultID == resultID {
+	h.fileContentMu.Unlock()
+	if snapshot == nil {
+		snapshot = parseDocumentSnapshot(path, text, 0, 0, 0, nil)
+	}
+	if params.PreviousResultID == snapshot.resultID {
 		return &protocol.DocumentDiagnosticReport{Value: protocol.UnchangedDocumentDiagnosticReport{
 			Kind:     string(protocol.DiagnosticUnchanged),
-			ResultID: resultID,
+			ResultID: snapshot.resultID,
 		}}, nil
 	}
-	_, err := memefish.ParseStatements(path, text)
 	return &protocol.DocumentDiagnosticReport{Value: protocol.FullDocumentDiagnosticReport{
 		Kind:     string(protocol.DiagnosticFull),
-		ResultID: resultID,
-		Items:    diagnosticsFromParseError(err, text),
+		ResultID: snapshot.resultID,
+		Items:    snapshot.diagnostics,
 	}}, nil
 }
 
@@ -1900,14 +1912,18 @@ func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.Work
 	}
 
 	h.fileContentMu.Lock()
-	contents := make(map[string]string, len(h.fileToContentMap))
+	snapshots := make(map[string]*documentSnapshot, len(h.fileToContentMap))
 	for path, content := range h.fileToContentMap {
-		contents[path] = string(content)
+		snapshot := h.documents[path]
+		if snapshot == nil {
+			snapshot = &documentSnapshot{path: path, text: string(content)}
+		}
+		snapshots[path] = snapshot
 	}
 	h.fileContentMu.Unlock()
 
-	paths := make([]string, 0, len(contents))
-	for path := range contents {
+	paths := make([]string, 0, len(snapshots))
+	for path := range snapshots {
 		paths = append(paths, path)
 	}
 	slices.Sort(paths)
@@ -1919,28 +1935,29 @@ func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.Work
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		text := contents[path]
-		resultID := fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
+		snapshot := snapshots[path]
+		if snapshot.resultID == "" {
+			snapshot = parseDocumentSnapshot(path, snapshot.text, 0, 0, 0, nil)
+		}
 		uri := protocol.URIFromPath(path)
-		if previous[uri] == resultID {
+		if previous[uri] == snapshot.resultID {
 			report.Items = append(report.Items, protocol.WorkspaceDocumentDiagnosticReport{Value: protocol.WorkspaceUnchangedDocumentDiagnosticReport{
 				URI:     uri,
 				Version: 0,
 				UnchangedDocumentDiagnosticReport: protocol.UnchangedDocumentDiagnosticReport{
 					Kind:     string(protocol.DiagnosticUnchanged),
-					ResultID: resultID,
+					ResultID: snapshot.resultID,
 				},
 			}})
 			continue
 		}
-		_, err := memefish.ParseStatements(path, text)
 		report.Items = append(report.Items, protocol.WorkspaceDocumentDiagnosticReport{Value: protocol.WorkspaceFullDocumentDiagnosticReport{
 			URI:     uri,
 			Version: 0,
 			FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
 				Kind:     string(protocol.DiagnosticFull),
-				ResultID: resultID,
-				Items:    diagnosticsFromParseError(err, text),
+				ResultID: snapshot.resultID,
+				Items:    snapshot.diagnostics,
 			},
 		}})
 	}
@@ -1948,33 +1965,43 @@ func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.Work
 }
 
 func (h *Handler) DidClose(ctx context.Context, params *protocol.DidCloseTextDocumentParams) (err error) {
-	if err := h.clearDiagnostics(ctx, params.TextDocument.URI); err != nil {
-		return err
-	}
 	path := params.TextDocument.URI.Path()
 	h.fileContentMu.Lock()
-	delete(h.openDocumentMap, path)
-	_, indexed := h.workspaceFileMap[path]
+	origin := h.documentOriginLocked(path) &^ documentOriginOpen
+	indexed := origin&documentOriginWorkspace != 0
+	if !indexed {
+		h.forgetDocumentLocked(path)
+	} else {
+		h.setDocumentOriginLocked(path, origin)
+	}
 	h.fileContentMu.Unlock()
 	if indexed {
 		h.restoreWorkspaceFile(path)
-		return nil
 	}
-	h.fileContentMu.Lock()
-	delete(h.fileToContentMap, path)
-	delete(h.parsedMap, path)
-	h.fileContentMu.Unlock()
-	return nil
+	return h.clearDiagnostics(ctx, params.TextDocument.URI)
 }
 
 func (h *Handler) DidSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error {
 	if params.Text == nil {
 		return nil
 	}
-	return h.parse(ctx, params.TextDocument.URI, *params.Text)
+	version := int32(0)
+	if snapshot := h.documentSnapshot(params.TextDocument.URI.Path()); snapshot != nil {
+		version = snapshot.version
+	}
+	return h.updateDocument(
+		ctx,
+		params.TextDocument.URI,
+		*params.Text,
+		version,
+		func(origin documentOrigin) documentOrigin { return origin },
+	)
 }
 
 func (h *Handler) clearDiagnostics(ctx context.Context, uri protocol.DocumentURI) error {
+	h.diagnosticPublishMu.Lock()
+	defer h.diagnosticPublishMu.Unlock()
+
 	client, err := h.Client()
 	if err != nil {
 		return err
@@ -1983,11 +2010,13 @@ func (h *Handler) clearDiagnostics(ctx context.Context, uri protocol.DocumentURI
 }
 
 func (h *Handler) DidOpen(ctx context.Context, params *protocol.DidOpenTextDocumentParams) (err error) {
-	err = h.parse(ctx, params.TextDocument.URI, params.TextDocument.Text)
-	h.fileContentMu.Lock()
-	h.openDocumentMap[params.TextDocument.URI.Path()] = struct{}{}
-	h.fileContentMu.Unlock()
-	return err
+	return h.updateDocument(
+		ctx,
+		params.TextDocument.URI,
+		params.TextDocument.Text,
+		params.TextDocument.Version,
+		func(origin documentOrigin) documentOrigin { return origin | documentOriginOpen },
+	)
 }
 
 func (h *Handler) restoreWorkspaceFile(path string) {
@@ -2000,18 +2029,10 @@ func (h *Handler) restoreWorkspaceFile(path string) {
 			return
 		}
 		delete(h.workspaceFileMap, path)
-		delete(h.fileToContentMap, path)
-		delete(h.parsedMap, path)
+		h.forgetDocumentLocked(path)
 		return
 	}
-	parsed, _ := memefish.ParseStatements(path, string(content))
-	h.fileContentMu.Lock()
-	defer h.fileContentMu.Unlock()
-	if _, open := h.openDocumentMap[path]; open {
-		return
-	}
-	h.fileToContentMap[path] = content
-	h.parsedMap[path] = parsed
+	h.storeWorkspaceDocument(path, string(content))
 }
 
 func (h *Handler) indexWorkspaceFile(path string) {
@@ -2029,15 +2050,7 @@ func (h *Handler) indexWorkspaceFile(path string) {
 		h.logger.Warn("failed to read workspace file", slog.String("path", path), slog.Any("err", err))
 		return
 	}
-	parsed, _ := memefish.ParseStatements(path, string(content))
-	h.fileContentMu.Lock()
-	defer h.fileContentMu.Unlock()
-	if _, open := h.openDocumentMap[path]; open {
-		return
-	}
-	h.fileToContentMap[path] = content
-	h.parsedMap[path] = parsed
-	h.workspaceFileMap[path] = struct{}{}
+	h.storeWorkspaceDocument(path, string(content))
 }
 
 func (h *Handler) removeWorkspaceFile(path string) {
@@ -2045,10 +2058,10 @@ func (h *Handler) removeWorkspaceFile(path string) {
 	defer h.fileContentMu.Unlock()
 	delete(h.workspaceFileMap, path)
 	if _, open := h.openDocumentMap[path]; open {
+		h.setDocumentOriginLocked(path, h.documentOriginLocked(path)&^documentOriginWorkspace)
 		return
 	}
-	delete(h.fileToContentMap, path)
-	delete(h.parsedMap, path)
+	h.forgetDocumentLocked(path)
 }
 
 func fileURIPath(rawURI string) (string, bool) {
@@ -2104,35 +2117,37 @@ func (h *Handler) DidChangeWatchedFiles(_ context.Context, params *protocol.DidC
 	return nil
 }
 
-func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text string) error {
-	client, err := h.Client()
-	if err != nil {
-		return err
+func (h *Handler) storeWorkspaceDocument(path, text string) {
+	h.fileContentMu.Lock()
+	if _, open := h.openDocumentMap[path]; open {
+		h.fileContentMu.Unlock()
+		return
 	}
+	h.documentRevisions[path]++
+	revision := h.documentRevisions[path]
+	previous := h.documents[path]
+	h.fileContentMu.Unlock()
+
+	snapshot := parseDocumentSnapshot(
+		path,
+		text,
+		0,
+		revision,
+		documentOriginWorkspace,
+		previous,
+	)
 
 	h.fileContentMu.Lock()
-	defer h.fileContentMu.Unlock()
-
-	h.fileToContentMap[uri.Path()] = []byte(text)
-
-	parsed, err := memefish.ParseStatements(uri.Path(), text)
-	h.parsedMap[uri.Path()] = parsed
-
-	if err != nil {
-		diags := diagnosticsFromParseError(err, text)
-		if len(diags) > 0 {
-			if publishErr := client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
-				URI:         uri,
-				Diagnostics: diags,
-			}); publishErr != nil {
-				return errors.Join(publishErr, err)
-			}
-			return err
-		}
-		h.logger.Info("unknown error", slog.Any("err", err))
+	if h.documentRevisions[path] != revision {
+		h.fileContentMu.Unlock()
+		return
 	}
-
-	return h.clearDiagnostics(ctx, uri)
+	if _, open := h.openDocumentMap[path]; open {
+		h.fileContentMu.Unlock()
+		return
+	}
+	h.fileContentMu.Unlock()
+	h.installDocumentSnapshot(snapshot)
 }
 
 func diagnosticsFromParseError(err error, text string) []protocol.Diagnostic {
@@ -2157,13 +2172,15 @@ func toProtocolRange(index textIndex, position *token.Position) protocol.Range {
 func NewHandler(logger *slog.Logger, importPaths []string) *Handler {
 	//c := compiler.New()
 	return &Handler{
-		logger:           logger,
-		importPaths:      importPaths,
-		fileToContentMap: make(map[string][]byte),
-		parsedMap:        make(map[string][]ast.Statement),
-		openDocumentMap:  make(map[string]struct{}),
-		workspaceFileMap: make(map[string]struct{}),
-		workspaceRootMap: make(map[string]struct{}),
+		logger:            logger,
+		importPaths:       importPaths,
+		documents:         make(map[string]*documentSnapshot),
+		documentRevisions: make(map[string]uint64),
+		fileToContentMap:  make(map[string][]byte),
+		parsedMap:         make(map[string][]ast.Statement),
+		openDocumentMap:   make(map[string]struct{}),
+		workspaceFileMap:  make(map[string]struct{}),
+		workspaceRootMap:  make(map[string]struct{}),
 	}
 }
 
@@ -2250,10 +2267,10 @@ func (h *Handler) removeWorkspaceFolder(root string) {
 		}
 		delete(h.workspaceFileMap, path)
 		if _, open := h.openDocumentMap[path]; open {
+			h.setDocumentOriginLocked(path, h.documentOriginLocked(path)&^documentOriginWorkspace)
 			continue
 		}
-		delete(h.fileToContentMap, path)
-		delete(h.parsedMap, path)
+		h.forgetDocumentLocked(path)
 	}
 }
 
