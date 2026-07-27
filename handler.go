@@ -1183,6 +1183,9 @@ func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.Docume
 	if site, ok := h.cteColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		return site.binding.highlights(), nil
 	}
+	if site, ok := h.derivedColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return site.binding.highlights(), nil
+	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
 			return nil, nil
@@ -1418,6 +1421,9 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
 	}
 	if site, ok := h.cteColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
+	}
+	if site, ok := h.derivedColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
 	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {

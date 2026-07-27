@@ -20,15 +20,16 @@ const (
 )
 
 type successfulDocumentSnapshot struct {
-	text          string
-	index         textIndex
-	statements    []ast.Statement
-	facts         documentFacts
-	ctes          cteIndex
-	cteColumns    cteColumnIndex
-	aliases       aliasIndex
-	selectAliases selectAliasIndex
-	revision      uint64
+	text           string
+	index          textIndex
+	statements     []ast.Statement
+	facts          documentFacts
+	ctes           cteIndex
+	cteColumns     cteColumnIndex
+	derivedColumns derivedColumnIndex
+	aliases        aliasIndex
+	selectAliases  selectAliasIndex
+	revision       uint64
 }
 
 type documentSnapshot struct {
@@ -39,6 +40,7 @@ type documentSnapshot struct {
 	facts          documentFacts
 	ctes           cteIndex
 	cteColumns     cteColumnIndex
+	derivedColumns derivedColumnIndex
 	aliases        aliasIndex
 	selectAliases  selectAliasIndex
 	diagnostics    []protocol.Diagnostic
@@ -64,22 +66,24 @@ func parseDocumentSnapshot(
 	aliases := extractAliasIndex(index, statements, ctes)
 	selectAliases := extractSelectAliasIndex(index, statements, aliases)
 	cteColumns := extractCTEColumnIndex(ctes, aliases, selectAliases)
+	derivedColumns := extractDerivedColumnIndex(aliases, selectAliases)
 	snapshot := &documentSnapshot{
-		path:          path,
-		text:          text,
-		index:         index,
-		statements:    statements,
-		facts:         facts,
-		ctes:          ctes,
-		cteColumns:    cteColumns,
-		aliases:       aliases,
-		selectAliases: selectAliases,
-		diagnostics:   diagnosticsFromParseError(parseErr, text),
-		parseErr:      parseErr,
-		resultID:      fmt.Sprintf("%x", sha256.Sum256([]byte(text))),
-		version:       version,
-		revision:      revision,
-		origin:        origin,
+		path:           path,
+		text:           text,
+		index:          index,
+		statements:     statements,
+		facts:          facts,
+		ctes:           ctes,
+		cteColumns:     cteColumns,
+		derivedColumns: derivedColumns,
+		aliases:        aliases,
+		selectAliases:  selectAliases,
+		diagnostics:    diagnosticsFromParseError(parseErr, text),
+		parseErr:       parseErr,
+		resultID:       fmt.Sprintf("%x", sha256.Sum256([]byte(text))),
+		version:        version,
+		revision:       revision,
+		origin:         origin,
 	}
 	if previous != nil {
 		snapshot.lastSuccessful = previous.lastSuccessful
@@ -95,15 +99,16 @@ func parseDocumentSnapshot(
 
 func successfulSnapshot(snapshot *documentSnapshot) *successfulDocumentSnapshot {
 	return &successfulDocumentSnapshot{
-		text:          snapshot.text,
-		index:         snapshot.index,
-		statements:    snapshot.statements,
-		facts:         snapshot.facts,
-		ctes:          snapshot.ctes,
-		cteColumns:    snapshot.cteColumns,
-		aliases:       snapshot.aliases,
-		selectAliases: snapshot.selectAliases,
-		revision:      snapshot.revision,
+		text:           snapshot.text,
+		index:          snapshot.index,
+		statements:     snapshot.statements,
+		facts:          snapshot.facts,
+		ctes:           snapshot.ctes,
+		cteColumns:     snapshot.cteColumns,
+		derivedColumns: snapshot.derivedColumns,
+		aliases:        snapshot.aliases,
+		selectAliases:  snapshot.selectAliases,
+		revision:       snapshot.revision,
 	}
 }
 
