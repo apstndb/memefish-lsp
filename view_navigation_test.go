@@ -109,3 +109,71 @@ func TestCodeLensCountsWorkspaceViewReferences(t *testing.T) {
 		t.Fatalf("CodeLens() = %#v, want two workspace view references", lenses)
 	}
 }
+
+func TestCompletionUsesKnownViewColumns(t *testing.T) {
+	const view = `CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS
+SELECT SingerId AS Id, Name, (STRUCT('active' AS label)).label
+FROM Singers`
+	const query = "SELECT v.x FROM ActiveSingers AS v"
+	h := newParsedTestHandler(t, "/schema.sql", view)
+	addParsedTestDocument(t, h, "/query.sql", query)
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(len("SELECT v.")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 3 {
+		t.Fatalf("Completion() items = %#v, want Id, label, and Name", got.Items)
+	}
+	want := []string{"Id", "label", "Name"}
+	for i, label := range want {
+		if got.Items[i].Label != label || got.Items[i].Detail != "column of view ActiveSingers" {
+			t.Fatalf("Completion() item %d = %#v, want %s view column", i, got.Items[i], label)
+		}
+	}
+}
+
+func TestCompletionRejectsUnknownViewShape(t *testing.T) {
+	tests := []struct {
+		name string
+		view string
+	}{
+		{
+			name: "star",
+			view: activeSingersViewDDL,
+		},
+		{
+			name: "anonymous expression",
+			view: "CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS SELECT 1 + 1",
+		},
+		{
+			name: "duplicate columns",
+			view: "CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS SELECT SingerId, SingerId FROM Singers",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const query = "SELECT v.x FROM ActiveSingers AS v"
+			h := newParsedTestHandler(t, "/schema.sql", test.view)
+			addParsedTestDocument(t, h, "/query.sql", query)
+
+			got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+					Position:     newTextIndex(query).position(len("SELECT v.")),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Items) != 0 {
+				t.Fatalf("Completion() items = %#v, want none for unknown view shape", got.Items)
+			}
+		})
+	}
+}

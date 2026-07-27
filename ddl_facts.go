@@ -52,6 +52,12 @@ type viewFact struct {
 	name             ddlName
 	sql              string
 	declarationRange protocol.Range
+	columns          []viewColumnFact
+	shapeKnown       bool
+}
+
+type viewColumnFact struct {
+	name ddlName
 }
 
 type ddlSymbolFact struct {
@@ -123,10 +129,13 @@ func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts 
 		case *ast.CreateView:
 			name := ddlNameFromPath(index, node.Name)
 			if add(node, name, protocol.Object, "") != nil {
+				columns, shapeKnown := extractViewColumnFacts(index, node.Query)
 				facts.views = append(facts.views, viewFact{
 					name:             name,
 					sql:              node.SQL(),
 					declarationRange: nodeRange(index, node),
+					columns:          columns,
+					shapeKnown:       shapeKnown,
 				})
 			}
 		case *ast.CreateIndex:
@@ -148,6 +157,31 @@ func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts 
 		}
 	}
 	return facts
+}
+
+func extractViewColumnFacts(index textIndex, query ast.QueryExpr) ([]viewColumnFact, bool) {
+	selectExpr, ok := query.(*ast.Select)
+	if !ok {
+		return nil, false
+	}
+	seen := make(map[string]struct{})
+	columns := make([]viewColumnFact, 0, len(selectExpr.Results))
+	for _, item := range selectExpr.Results {
+		ident, _ := selectItemAlias(item)
+		if ident == nil {
+			return nil, false
+		}
+		name := identName(ident)
+		key := strings.ToUpper(name)
+		if _, duplicate := seen[key]; duplicate {
+			return nil, false
+		}
+		seen[key] = struct{}{}
+		columns = append(columns, viewColumnFact{
+			name: ddlNameFromIdent(index, ident),
+		})
+	}
+	return columns, true
 }
 
 func ddlNameFromPath(index textIndex, path *ast.Path) ddlName {

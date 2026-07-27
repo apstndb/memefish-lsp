@@ -942,25 +942,40 @@ func (h *Handler) aliasMemberCompletionItemsLocked(
 		return []protocol.CompletionItem{}
 	}
 	tables := h.tableFactMatchesLocked(binding.sourceTableName)
-	if len(tables) != 1 {
+	views := h.viewFactMatchesLocked(binding.sourceTableName)
+	if len(tables)+len(views) != 1 {
 		return []protocol.CompletionItem{}
 	}
 
 	var items []protocol.CompletionItem
-	for _, column := range tables[0].table.columns {
-		name := column.name.string()
-		if !strings.HasPrefix(strings.ToUpper(name), strings.ToUpper(prefix)) {
-			continue
+	if len(tables) == 1 {
+		for _, column := range tables[0].table.columns {
+			name := column.name.string()
+			if !strings.HasPrefix(strings.ToUpper(name), strings.ToUpper(prefix)) {
+				continue
+			}
+			detail := "column of " + binding.sourceTableName
+			if column.schemaType != nil {
+				detail = column.schemaType.SQL()
+			}
+			items = append(items, protocol.CompletionItem{
+				Label:  name,
+				Kind:   protocol.FieldCompletion,
+				Detail: detail,
+			})
 		}
-		detail := "column of " + binding.sourceTableName
-		if column.schemaType != nil {
-			detail = column.schemaType.SQL()
+	} else if views[0].shapeKnown {
+		for _, column := range views[0].columns {
+			name := column.name.string()
+			if !strings.HasPrefix(strings.ToUpper(name), strings.ToUpper(prefix)) {
+				continue
+			}
+			items = append(items, protocol.CompletionItem{
+				Label:  name,
+				Kind:   protocol.FieldCompletion,
+				Detail: "column of view " + binding.sourceTableName,
+			})
 		}
-		items = append(items, protocol.CompletionItem{
-			Label:  name,
-			Kind:   protocol.FieldCompletion,
-			Detail: detail,
-		})
 	}
 	slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
 		return strings.Compare(strings.ToUpper(a.Label), strings.ToUpper(b.Label))
