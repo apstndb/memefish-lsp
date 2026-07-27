@@ -961,6 +961,23 @@ func (h *Handler) aliasMemberCompletionItemsLocked(
 		})
 		return items
 	}
+	if binding.sourceShapeKnown {
+		var items []protocol.CompletionItem
+		for _, column := range binding.sourceColumns {
+			name := column.name.string()
+			if strings.HasPrefix(strings.ToUpper(name), strings.ToUpper(prefix)) {
+				items = append(items, protocol.CompletionItem{
+					Label:  name,
+					Kind:   protocol.FieldCompletion,
+					Detail: "column of derived table",
+				})
+			}
+		}
+		slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
+			return strings.Compare(strings.ToUpper(a.Label), strings.ToUpper(b.Label))
+		})
+		return items
+	}
 	if binding.sourceTableName == "" {
 		return []protocol.CompletionItem{}
 	}

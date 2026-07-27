@@ -207,6 +207,47 @@ SELECT * FROM U`
 	}
 }
 
+func TestCompletionUsesDerivedTableShape(t *testing.T) {
+	const query = `SELECT d.I
+FROM (SELECT SingerId AS Id, Name FROM Singers) AS d`
+	h := newParsedTestHandler(t, "/query.sql", query)
+	position := newTextIndex(query).position(strings.Index(query, "d.I") + len("d.I"))
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     position,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 1 ||
+		got.Items[0].Label != "Id" ||
+		got.Items[0].Detail != "column of derived table" {
+		t.Fatalf("Completion() items = %#v, want derived-table column Id", got.Items)
+	}
+}
+
+func TestCompletionRejectsUnknownDerivedTableShape(t *testing.T) {
+	const query = `SELECT d.I
+FROM (SELECT * FROM Singers) AS d`
+	h := newParsedTestHandler(t, "/query.sql", query)
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "d.I") + len("d.I")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 0 {
+		t.Fatalf("Completion() items = %#v, want none for SELECT * derived table", got.Items)
+	}
+}
+
 func TestCompletionRejectsAmbiguousTableShape(t *testing.T) {
 	const query = "SELECT s. FROM Singers AS s"
 	statements, _ := memefish.ParseStatements("/query.sql", query)

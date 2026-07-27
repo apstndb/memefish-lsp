@@ -16,6 +16,8 @@ type aliasBinding struct {
 	referenceRanges  []protocol.Range
 	sourceTableName  string
 	sourceCTE        *cteBinding
+	sourceColumns    []queryColumnFact
+	sourceShapeKnown bool
 	ambiguous        bool
 }
 
@@ -144,7 +146,7 @@ func collectTableAliases(
 		if cteBound {
 			sourceName = ""
 		}
-		addTableAlias(index, table.As, sourceName, sourceCTE, scope, localNames, result)
+		addTableAlias(index, table.As, sourceName, sourceCTE, nil, false, scope, localNames, result)
 	case *ast.PathTableExpr:
 		sourcePaths[nodeRange(index, table.Path)] = struct{}{}
 		sourceName := pathName(table.Path)
@@ -152,16 +154,17 @@ func collectTableAliases(
 		if cteBound {
 			sourceName = ""
 		}
-		addTableAlias(index, table.As, sourceName, sourceCTE, scope, localNames, result)
+		addTableAlias(index, table.As, sourceName, sourceCTE, nil, false, scope, localNames, result)
 		if table.WithOffset != nil {
-			addTableAlias(index, table.WithOffset.As, "", nil, scope, localNames, result)
+			addTableAlias(index, table.WithOffset.As, "", nil, nil, false, scope, localNames, result)
 		}
 	case *ast.SubQueryTableExpr:
-		addTableAlias(index, table.As, "", nil, scope, localNames, result)
+		columns, shapeKnown := extractQueryColumnFacts(index, table.Query)
+		addTableAlias(index, table.As, "", nil, columns, shapeKnown, scope, localNames, result)
 	case *ast.Unnest:
-		addTableAlias(index, table.As, "", nil, scope, localNames, result)
+		addTableAlias(index, table.As, "", nil, nil, false, scope, localNames, result)
 		if table.WithOffset != nil {
-			addTableAlias(index, table.WithOffset.As, "", nil, scope, localNames, result)
+			addTableAlias(index, table.WithOffset.As, "", nil, nil, false, scope, localNames, result)
 		}
 	case *ast.ParenTableExpr:
 		collectTableAliases(index, table.Source, scope, localNames, sourcePaths, ctes, result)
@@ -176,6 +179,8 @@ func addTableAlias(
 	as *ast.AsAlias,
 	sourceTableName string,
 	sourceCTE *cteBinding,
+	sourceColumns []queryColumnFact,
+	sourceShapeKnown bool,
 	scope map[string]*aliasBinding,
 	localNames map[string]struct{},
 	result *aliasIndex,
@@ -189,6 +194,8 @@ func addTableAlias(
 		declarationRange: nodeRange(index, as.Alias),
 		sourceTableName:  sourceTableName,
 		sourceCTE:        sourceCTE,
+		sourceColumns:    sourceColumns,
+		sourceShapeKnown: sourceShapeKnown,
 	}
 	result.bindings = append(result.bindings, binding)
 	result.sites = append(result.sites, aliasSite{
