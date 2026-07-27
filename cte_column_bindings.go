@@ -13,6 +13,7 @@ type cteColumnBinding struct {
 	referenceRanges  []protocol.Range
 	scope            map[string]*cteColumnBinding
 	explicit         bool
+	column           queryColumnFact
 }
 
 type cteColumnSite struct {
@@ -43,6 +44,7 @@ func extractCTEColumnIndex(
 				declarationRange: column.name.selectionRange(),
 				scope:            scope,
 				explicit:         column.explicit,
+				column:           column,
 			}
 			scope[strings.ToUpper(binding.name)] = binding
 			result.bindings = append(result.bindings, binding)

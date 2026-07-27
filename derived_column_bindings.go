@@ -13,6 +13,7 @@ type derivedColumnBinding struct {
 	referenceRanges  []protocol.Range
 	scope            map[string]*derivedColumnBinding
 	explicit         bool
+	column           queryColumnFact
 }
 
 type derivedColumnSite struct {
@@ -43,6 +44,7 @@ func extractDerivedColumnIndex(
 				declarationRange: column.name.selectionRange(),
 				scope:            scope,
 				explicit:         column.explicit,
+				column:           column,
 			}
 			scope[strings.ToUpper(binding.name)] = binding
 			result.bindings = append(result.bindings, binding)

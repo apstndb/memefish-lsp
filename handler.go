@@ -1382,6 +1382,20 @@ func (h *Handler) TypeDefinition(ctx context.Context, params *protocol.TypeDefin
 	if h.selectAliasIndexLocked(path, text).ambiguousAtPosition(params.Position) {
 		return []protocol.Location{}, nil
 	}
+	if site, ok := h.cteColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return h.queryColumnTypeDefinitionLocked(
+			path,
+			site.binding.column,
+			make(map[queryColumnTypeVisit]struct{}),
+		), nil
+	}
+	if site, ok := h.derivedColumnIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return h.queryColumnTypeDefinitionLocked(
+			path,
+			site.binding.column,
+			make(map[queryColumnTypeVisit]struct{}),
+		), nil
+	}
 	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok {
 		return h.aliasMemberTypeDefinitionLocked(
 			path,

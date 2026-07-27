@@ -58,6 +58,37 @@ SELECT r.Id FROM LocalRows AS r`
 	}
 }
 
+func TestTypeDefinitionFromQueryColumnDeclarationAndReference(t *testing.T) {
+	const query = `SELECT d.Id
+FROM (
+  SELECT s.SingerId AS Id FROM Singers AS s GROUP BY Id
+) AS d`
+	const schema = "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", schema)
+	index := newTextIndex(query)
+
+	positions := []protocol.Position{
+		index.position(strings.Index(query, " AS Id") + len(" AS ")),
+		index.position(strings.Index(query, "GROUP BY Id") + len("GROUP BY ")),
+	}
+	want := schemaTypeLocation(schema)
+	for _, position := range positions {
+		got, err := h.TypeDefinition(context.Background(), &protocol.TypeDefinitionParams{
+			TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+				Position:     position,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("TypeDefinition(%#v) = %#v, want %#v", position, got, want)
+		}
+	}
+}
+
 func TestTypeDefinitionFollowsViewPassThroughColumn(t *testing.T) {
 	const query = "SELECT v.Id FROM ActiveSingers AS v"
 	const schema = `CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);
