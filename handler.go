@@ -99,41 +99,33 @@ func (h *Handler) SelectionRange(ctx context.Context, params *protocol.Selection
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
-	parsed := h.parsedMap[params.TextDocument.URI.Path()]
-	lex := newLexer(params.TextDocument.URI.Path(), string(h.fileToContentMap[params.TextDocument.URI.Path()]))
-	var result []protocol.SelectionRange
+	path := params.TextDocument.URI.Path()
+	parsed := h.parsedMap[path]
+	lex := newLexer(path, string(h.fileToContentMap[path]))
+	result := make([]protocol.SelectionRange, 0, len(params.Positions))
+	for _, pos := range params.Positions {
+		result = append(result, selectionRangeAtPosition(h.logger, lex, parsed, pos))
+	}
+	return result, nil
+}
 
-	path := findNodesByPos(h.logger, lex, parsed, params.Positions[0])
-	var parent *protocol.SelectionRange
-	for i, elem := range path {
-		if i == 0 {
-			parent = &protocol.SelectionRange{
-				Range: rangeByNode(lex, elem.Node),
-			}
-		}
-
-		var selectionRange *protocol.SelectionRange
-		switch n := elem.Node.(type) {
-		case *ast.CTE:
-			selectionRange = &protocol.SelectionRange{
-				Range:  rangeByNode(lex, n.QueryExpr),
-				Parent: parent,
-			}
-		case *ast.SubQuery, *ast.SubQueryTableExpr:
-			selectionRange = &protocol.SelectionRange{
-				Range:  rangeByNode(lex, n),
-				Parent: parent,
-			}
-		default:
+func selectionRangeAtPosition(logger *slog.Logger, lex *memefish.Lexer, stmts []ast.Statement, pos protocol.Position) protocol.SelectionRange {
+	var current *protocol.SelectionRange
+	for _, elem := range findNodesByPos(logger, lex, stmts, pos) {
+		r := rangeByNode(lex, elem.Node)
+		if current == nil {
+			current = &protocol.SelectionRange{Range: r}
 			continue
 		}
-
-		parent = selectionRange
+		if r == current.Range || !rangeContains(current.Range, r) {
+			continue
+		}
+		current = &protocol.SelectionRange{Range: r, Parent: current}
 	}
-
-	result = append(result, *parent)
-
-	return result, nil
+	if current == nil {
+		return protocol.SelectionRange{Range: protocol.Range{Start: pos, End: pos}}
+	}
+	return *current
 }
 
 func fullname(idents []*ast.Ident) string {
@@ -331,7 +323,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 							continue
 						}
 
-						if int(parsed) > len(names) {
+						if parsed <= 0 || parsed > int64(len(names)) {
 							continue
 						}
 						name := cmp.Or(names[parsed-1], n.Results[parsed-1].SQL())
@@ -354,7 +346,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 							continue
 						}
 
-						if int(parsed) > len(names) {
+						if parsed <= 0 || parsed > int64(len(names)) {
 							continue
 						}
 						result = append(result, newInlayHint(lex, protocol.Parameter, expr.Expr.End(), "/* "+names[parsed-1]+" */"))
@@ -454,6 +446,9 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 		}
 		return true
 	})
+	result = slices.DeleteFunc(result, func(hint protocol.InlayHint) bool {
+		return !rangeIncludesPosition(params.Range, hint.Position)
+	})
 	return result, nil
 }
 
@@ -520,7 +515,7 @@ func generateInlayHintForSelectItems(lex *memefish.Lexer, query ast.QueryExpr, c
 
 		for i, item := range q.Results {
 			// TODO: warn mismatch
-			if i > len(columnNames) {
+			if i >= len(columnNames) {
 				continue
 			}
 
