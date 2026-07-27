@@ -12,6 +12,7 @@ import (
 
 type cteBinding struct {
 	name             string
+	range_           protocol.Range
 	declarationRange protocol.Range
 	referenceRanges  []protocol.Range
 	columns          []queryColumnFact
@@ -75,6 +76,7 @@ func indexQueryCTEs(index textIndex, query *ast.Query, outerScope map[string]*ct
 			columns, shapeKnown := extractQueryColumnFacts(index, cte.QueryExpr)
 			binding := &cteBinding{
 				name:             name.string(),
+				range_:           nodeRange(index, cte),
 				declarationRange: name.selectionRange(),
 				columns:          columns,
 				shapeKnown:       shapeKnown,

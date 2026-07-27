@@ -149,9 +149,13 @@ func (h *Handler) DocumentSymbol(ctx context.Context, params *protocol.DocumentS
 	h.fileContentMu.Unlock()
 
 	if snapshot != nil {
-		return documentSymbolsFromFacts(snapshot.facts), nil
+		return documentSymbolsFromFactsAndCTEs(snapshot.facts, snapshot.ctes), nil
 	}
-	return documentSymbolsFromFacts(extractDDLFacts(newTextIndex(text), statements)), nil
+	index := newTextIndex(text)
+	return documentSymbolsFromFactsAndCTEs(
+		extractDDLFacts(index, statements),
+		extractCTEIndex(index, statements),
+	), nil
 }
 
 type documentFactSource struct {
