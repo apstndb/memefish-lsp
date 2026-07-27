@@ -15,6 +15,7 @@ type selectAliasBinding struct {
 	referenceRanges  []protocol.Range
 	scope            map[string]*selectAliasBinding
 	ambiguous        bool
+	explicit         bool
 }
 
 type selectAliasSite struct {
@@ -65,15 +66,16 @@ func indexSelectResultAliases(
 ) {
 	scope := make(map[string]*selectAliasBinding)
 	for _, item := range selectExpr.Results {
-		alias, ok := item.(*ast.Alias)
-		if !ok || alias.As == nil || alias.As.Alias == nil {
+		ident, explicit := selectItemAlias(item)
+		if ident == nil {
 			continue
 		}
-		name := identName(alias.As.Alias)
+		name := identName(ident)
 		binding := &selectAliasBinding{
 			name:             name,
-			declarationRange: nodeRange(index, alias.As.Alias),
+			declarationRange: nodeRange(index, ident),
 			scope:            scope,
+			explicit:         explicit,
 		}
 		result.bindings = append(result.bindings, binding)
 		result.sites = append(result.sites, selectAliasSite{
@@ -103,6 +105,27 @@ func indexSelectResultAliases(
 	if orderBy != nil {
 		addSelectAliasReferences(index, orderBy, scope, tableAliases, result)
 	}
+}
+
+func selectItemAlias(item ast.SelectItem) (*ast.Ident, bool) {
+	switch item := item.(type) {
+	case *ast.Alias:
+		if item.As != nil {
+			return item.As.Alias, true
+		}
+	case *ast.ExprSelectItem:
+		switch expr := item.Expr.(type) {
+		case *ast.Ident:
+			return expr, false
+		case *ast.Path:
+			if len(expr.Idents) > 0 {
+				return expr.Idents[len(expr.Idents)-1], false
+			}
+		case *ast.SelectorExpr:
+			return expr.Ident, false
+		}
+	}
+	return nil, false
 }
 
 func addSelectAliasReferences(
@@ -197,9 +220,13 @@ func (binding *selectAliasBinding) locations(
 }
 
 func (binding *selectAliasBinding) highlights() []protocol.DocumentHighlight {
+	declarationKind := protocol.Text
+	if binding.explicit {
+		declarationKind = protocol.Write
+	}
 	result := []protocol.DocumentHighlight{{
 		Range: binding.declarationRange,
-		Kind:  protocol.Write,
+		Kind:  declarationKind,
 	}}
 	for _, referenceRange := range binding.referenceRanges {
 		result = append(result, protocol.DocumentHighlight{

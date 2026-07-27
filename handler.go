@@ -1204,10 +1204,12 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 		if site.binding.ambiguous {
 			return nil, nil
 		}
-		return []protocol.Location{{
-			URI:   params.TextDocument.URI,
-			Range: site.binding.declarationRange,
-		}}, nil
+		if !site.declaration || site.binding.explicit {
+			return []protocol.Location{{
+				URI:   params.TextDocument.URI,
+				Range: site.binding.declarationRange,
+			}}, nil
+		}
 	}
 	if member, ok := aliases.memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
 		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
@@ -1491,7 +1493,7 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 		}, nil
 	}
 	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
-		if site.binding.ambiguous {
+		if site.binding.ambiguous || !site.binding.explicit {
 			return nil, nil
 		}
 		return &protocol.PrepareRenameResult{
@@ -1544,7 +1546,7 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 		}, nil
 	}
 	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
-		if site.binding.ambiguous {
+		if site.binding.ambiguous || !site.binding.explicit {
 			return nil, nil
 		}
 		if site.binding.renameConflicts(params.NewName) {
@@ -1612,7 +1614,7 @@ func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.Linke
 		}, nil
 	}
 	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
-		if site.binding.ambiguous {
+		if site.binding.ambiguous || !site.binding.explicit {
 			return nil, nil
 		}
 		ranges := make([]protocol.Range, 0, len(site.binding.referenceRanges)+1)
