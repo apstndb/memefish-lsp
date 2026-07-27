@@ -58,6 +58,7 @@ type viewFact struct {
 
 type viewColumnFact struct {
 	name ddlName
+	sql  string
 }
 
 type ddlSymbolFact struct {
@@ -179,6 +180,7 @@ func extractViewColumnFacts(index textIndex, query ast.QueryExpr) ([]viewColumnF
 		seen[key] = struct{}{}
 		columns = append(columns, viewColumnFact{
 			name: ddlNameFromIdent(index, ident),
+			sql:  item.SQL(),
 		})
 	}
 	return columns, true

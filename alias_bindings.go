@@ -373,6 +373,12 @@ type tableColumnFactMatch struct {
 	column tableColumnFact
 }
 
+type viewColumnFactMatch struct {
+	uri      protocol.DocumentURI
+	viewName string
+	column   viewColumnFact
+}
+
 type tableFactMatch struct {
 	uri   protocol.DocumentURI
 	table tableFact
@@ -408,6 +414,33 @@ func (h *Handler) tableColumnFactMatchesLocked(tableName, columnName string) []t
 					uri:    match.uri,
 					column: column,
 				})
+			}
+		}
+	}
+	return result
+}
+
+func (h *Handler) viewColumnFactMatchesLocked(viewName, columnName string) []viewColumnFactMatch {
+	var result []viewColumnFactMatch
+	for path, content := range h.fileToContentMap {
+		var facts documentFacts
+		if snapshot := h.documents[path]; snapshot != nil {
+			facts = snapshot.facts
+		} else {
+			facts = extractDDLFacts(newTextIndex(string(content)), h.parsedMap[path])
+		}
+		for _, view := range facts.views {
+			if !strings.EqualFold(view.name.string(), viewName) || !view.shapeKnown {
+				continue
+			}
+			for _, column := range view.columns {
+				if strings.EqualFold(column.name.string(), columnName) {
+					result = append(result, viewColumnFactMatch{
+						uri:      protocol.URIFromPath(path),
+						viewName: view.name.string(),
+						column:   column,
+					})
+				}
 			}
 		}
 	}

@@ -1227,11 +1227,18 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 		}
 	}
 	if member, ok := aliases.memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
-		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
-		if len(matches) == 1 {
+		tableMatches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
+		viewMatches := h.viewColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
+		if len(tableMatches)+len(viewMatches) == 1 && len(tableMatches) == 1 {
 			return []protocol.Location{{
-				URI:   matches[0].uri,
-				Range: matches[0].column.name.selectionRange(),
+				URI:   tableMatches[0].uri,
+				Range: tableMatches[0].column.name.selectionRange(),
+			}}, nil
+		}
+		if len(tableMatches)+len(viewMatches) == 1 && len(viewMatches) == 1 {
+			return []protocol.Location{{
+				URI:   viewMatches[0].uri,
+				Range: viewMatches[0].column.name.selectionRange(),
 			}}, nil
 		}
 		return nil, nil
@@ -1909,16 +1916,26 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 	}
 	lex := newLexer(path, text)
 	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
-		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
-		if len(matches) != 1 {
+		tableMatches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
+		viewMatches := h.viewColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
+		if len(tableMatches)+len(viewMatches) != 1 {
 			return nil, nil
 		}
-		match := matches[0]
+		if len(tableMatches) == 1 {
+			return &protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind: protocol.Markdown,
+					Value: "**Column** `" + member.binding.sourceTableName + "." + member.name +
+						"`\n\n```sql\n" + tableMatches[0].column.sql + "\n```",
+				},
+				Range: member.range_,
+			}, nil
+		}
 		return &protocol.Hover{
 			Contents: protocol.MarkupContent{
 				Kind: protocol.Markdown,
-				Value: "**Column** `" + member.binding.sourceTableName + "." + member.name +
-					"`\n\n```sql\n" + match.column.sql + "\n```",
+				Value: "**View column** `" + viewMatches[0].viewName + "." + member.name +
+					"`\n\n```sql\n" + viewMatches[0].column.sql + "\n```",
 			},
 			Range: member.range_,
 		}, nil

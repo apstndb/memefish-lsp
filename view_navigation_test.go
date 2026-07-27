@@ -177,3 +177,98 @@ func TestCompletionRejectsUnknownViewShape(t *testing.T) {
 		})
 	}
 }
+
+func TestDefinitionResolvesViewAliasColumns(t *testing.T) {
+	const view = `CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS
+SELECT SingerId AS Id, Name FROM Singers`
+	const query = "SELECT v.Id, v.Name FROM ActiveSingers AS v"
+	h := newParsedTestHandler(t, "/schema.sql", view)
+	addParsedTestDocument(t, h, "/query.sql", query)
+	viewIndex := newTextIndex(view)
+
+	tests := []struct {
+		name              string
+		columnName        string
+		queryOffset       int
+		declarationOffset int
+	}{
+		{
+			name:              "explicit",
+			columnName:        "Id",
+			queryOffset:       strings.Index(query, "Id"),
+			declarationOffset: strings.Index(view, " AS Id") + len(" AS "),
+		},
+		{
+			name:              "implicit",
+			columnName:        "Name",
+			queryOffset:       strings.Index(query, "Name"),
+			declarationOffset: strings.Index(view, "Name"),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := h.Definition(context.Background(), &protocol.DefinitionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+					Position:     newTextIndex(query).position(test.queryOffset),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := viewIndex.rangeByByteOffsets(
+				test.declarationOffset,
+				test.declarationOffset+len(test.columnName),
+			)
+			if len(got) != 1 || got[0].URI != "file:///schema.sql" || got[0].Range != want {
+				t.Fatalf("Definition() = %#v, want view column %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestHoverDescribesViewAliasColumn(t *testing.T) {
+	const view = `CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS
+SELECT SingerId AS Id FROM Singers`
+	const query = "SELECT v.Id FROM ActiveSingers AS v"
+	h := newParsedTestHandler(t, "/schema.sql", view)
+	addParsedTestDocument(t, h, "/query.sql", query)
+	memberOffset := strings.Index(query, "Id")
+
+	got, err := h.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(memberOffset),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !strings.Contains(got.Contents.Value, "**View column** `ActiveSingers.Id`") ||
+		!strings.Contains(got.Contents.Value, "SingerId AS Id") {
+		t.Fatalf("Hover() = %#v, want view output expression", got)
+	}
+	want := newTextIndex(query).rangeByByteOffsets(memberOffset, memberOffset+len("Id"))
+	if got.Range != want {
+		t.Fatalf("Hover() range = %#v, want %#v", got.Range, want)
+	}
+}
+
+func TestViewAliasColumnNavigationRejectsUnknownShape(t *testing.T) {
+	const query = "SELECT v.Id FROM ActiveSingers AS v"
+	h := newParsedTestHandler(t, "/schema.sql", activeSingersViewDDL)
+	addParsedTestDocument(t, h, "/query.sql", query)
+
+	got, err := h.Definition(context.Background(), &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "Id")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Definition() = %#v, want none for SELECT * view shape", got)
+	}
+}
