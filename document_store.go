@@ -25,6 +25,7 @@ type successfulDocumentSnapshot struct {
 	statements    []ast.Statement
 	facts         documentFacts
 	ctes          cteIndex
+	cteColumns    cteColumnIndex
 	aliases       aliasIndex
 	selectAliases selectAliasIndex
 	revision      uint64
@@ -37,6 +38,7 @@ type documentSnapshot struct {
 	statements     []ast.Statement
 	facts          documentFacts
 	ctes           cteIndex
+	cteColumns     cteColumnIndex
 	aliases        aliasIndex
 	selectAliases  selectAliasIndex
 	diagnostics    []protocol.Diagnostic
@@ -61,6 +63,7 @@ func parseDocumentSnapshot(
 	ctes := extractCTEIndex(index, statements)
 	aliases := extractAliasIndex(index, statements, ctes)
 	selectAliases := extractSelectAliasIndex(index, statements, aliases)
+	cteColumns := extractCTEColumnIndex(ctes, aliases, selectAliases)
 	snapshot := &documentSnapshot{
 		path:          path,
 		text:          text,
@@ -68,6 +71,7 @@ func parseDocumentSnapshot(
 		statements:    statements,
 		facts:         facts,
 		ctes:          ctes,
+		cteColumns:    cteColumns,
 		aliases:       aliases,
 		selectAliases: selectAliases,
 		diagnostics:   diagnosticsFromParseError(parseErr, text),
@@ -96,6 +100,7 @@ func successfulSnapshot(snapshot *documentSnapshot) *successfulDocumentSnapshot 
 		statements:    snapshot.statements,
 		facts:         snapshot.facts,
 		ctes:          snapshot.ctes,
+		cteColumns:    snapshot.cteColumns,
 		aliases:       snapshot.aliases,
 		selectAliases: snapshot.selectAliases,
 		revision:      snapshot.revision,
