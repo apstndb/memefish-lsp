@@ -928,7 +928,13 @@ func (h *Handler) aliasMemberCompletionItemsLocked(
 	qualifierPosition protocol.Position,
 	cursorPosition protocol.Position,
 ) []protocol.CompletionItem {
-	binding, ok := h.aliasIndexLocked(path, text).bindingAtPosition(qualifier, qualifierPosition)
+	tableAliases := h.aliasIndexLocked(path, text)
+	selectAliases := h.selectAliasIndexLocked(path, text)
+	if selectAliases.ambiguousAtPosition(qualifierPosition) ||
+		selectAliases.ambiguousAtPosition(cursorPosition) {
+		return []protocol.CompletionItem{}
+	}
+	binding, ok := tableAliases.bindingAtPosition(qualifier, qualifierPosition)
 	if !ok {
 		binding, ok = repairedAliasBinding(path, text, qualifier, qualifierPosition, cursorPosition)
 	}
@@ -979,7 +985,12 @@ func repairedAliasBinding(
 	}
 	repairedIndex := newTextIndex(repairedText)
 	ctes := extractCTEIndex(repairedIndex, statements)
-	return extractAliasIndex(repairedIndex, statements, ctes).bindingAtPosition(qualifier, qualifierPosition)
+	tableAliases := extractAliasIndex(repairedIndex, statements, ctes)
+	selectAliases := extractSelectAliasIndex(repairedIndex, statements, tableAliases)
+	if selectAliases.ambiguousAtPosition(qualifierPosition) {
+		return nil, false
+	}
+	return tableAliases.bindingAtPosition(qualifier, qualifierPosition)
 }
 
 func appendWorkspaceCompletionItems(items []protocol.CompletionItem, parsed map[string][]ast.Statement, prefix string) []protocol.CompletionItem {
@@ -1098,10 +1109,20 @@ func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.Docume
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	selectAliases := h.selectAliasIndexLocked(path, text)
+	if selectAliases.ambiguousAtPosition(params.Position) {
+		return nil, nil
+	}
 	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		return site.binding.highlights(), nil
 	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		return site.binding.highlights(), nil
+	}
+	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
 			return nil, nil
 		}
@@ -1159,6 +1180,10 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	selectAliases := h.selectAliasIndexLocked(path, text)
+	if selectAliases.ambiguousAtPosition(params.Position) {
+		return nil, nil
+	}
 	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		return []protocol.Location{{
 			URI:   params.TextDocument.URI,
@@ -1167,6 +1192,15 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 	}
 	aliases := h.aliasIndexLocked(path, text)
 	if site, ok := aliases.siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		return []protocol.Location{{
+			URI:   params.TextDocument.URI,
+			Range: site.binding.declarationRange,
+		}}, nil
+	}
+	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
 			return nil, nil
 		}
@@ -1237,6 +1271,9 @@ func (h *Handler) TypeDefinition(ctx context.Context, params *protocol.TypeDefin
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	if h.selectAliasIndexLocked(path, text).ambiguousAtPosition(params.Position) {
+		return []protocol.Location{}, nil
+	}
 	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
 		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
 		if len(matches) == 1 {
@@ -1268,10 +1305,20 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	selectAliases := h.selectAliasIndexLocked(path, text)
+	if selectAliases.ambiguousAtPosition(params.Position) {
+		return nil, nil
+	}
 	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
 	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
+	}
+	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
 			return nil, nil
 		}
@@ -1429,8 +1476,21 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	selectAliases := h.selectAliasIndexLocked(path, text)
+	if selectAliases.ambiguousAtPosition(params.Position) {
+		return nil, nil
+	}
 	aliases := h.aliasIndexLocked(path, text)
 	if site, ok := aliases.siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		return &protocol.PrepareRenameResult{
+			Range:       site.range_,
+			Placeholder: site.binding.name,
+		}, nil
+	}
+	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
 			return nil, nil
 		}
@@ -1465,6 +1525,10 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 	uri := params.TextDocument.URI
 	path := uri.Path()
 	text := string(h.fileToContentMap[path])
+	selectAliases := h.selectAliasIndexLocked(path, text)
+	if selectAliases.ambiguousAtPosition(params.Position) {
+		return nil, nil
+	}
 	aliases := h.aliasIndexLocked(path, text)
 	if site, ok := aliases.siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
@@ -1472,6 +1536,19 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 		}
 		if aliases.renameConflicts(site.binding, params.NewName) {
 			return nil, fmt.Errorf("table alias %q already exists", params.NewName)
+		}
+		return &protocol.WorkspaceEdit{
+			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+				uri: site.binding.edits(params.NewName),
+			},
+		}, nil
+	}
+	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		if site.binding.renameConflicts(params.NewName) {
+			return nil, fmt.Errorf("select alias %q already exists", params.NewName)
 		}
 		return &protocol.WorkspaceEdit{
 			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
@@ -1515,7 +1592,26 @@ func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.Linke
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	selectAliases := h.selectAliasIndexLocked(path, text)
+	if selectAliases.ambiguousAtPosition(params.Position) {
+		return nil, nil
+	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		ranges := make([]protocol.Range, 0, len(site.binding.referenceRanges)+1)
+		ranges = append(ranges, site.binding.declarationRange)
+		ranges = append(ranges, site.binding.referenceRanges...)
+		if len(ranges) < 2 {
+			return nil, nil
+		}
+		return &protocol.LinkedEditingRanges{
+			Ranges:      ranges,
+			WordPattern: "[A-Za-z_][A-Za-z0-9_]*",
+		}, nil
+	}
+	if site, ok := selectAliases.siteAtPosition(params.Position); ok {
 		if site.binding.ambiguous {
 			return nil, nil
 		}
@@ -1714,6 +1810,9 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	if h.selectAliasIndexLocked(path, text).ambiguousAtPosition(params.Position) {
+		return nil, nil
+	}
 	lex := newLexer(path, text)
 	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
 		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)

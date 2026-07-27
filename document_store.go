@@ -20,13 +20,14 @@ const (
 )
 
 type successfulDocumentSnapshot struct {
-	text       string
-	index      textIndex
-	statements []ast.Statement
-	facts      documentFacts
-	ctes       cteIndex
-	aliases    aliasIndex
-	revision   uint64
+	text          string
+	index         textIndex
+	statements    []ast.Statement
+	facts         documentFacts
+	ctes          cteIndex
+	aliases       aliasIndex
+	selectAliases selectAliasIndex
+	revision      uint64
 }
 
 type documentSnapshot struct {
@@ -37,6 +38,7 @@ type documentSnapshot struct {
 	facts          documentFacts
 	ctes           cteIndex
 	aliases        aliasIndex
+	selectAliases  selectAliasIndex
 	diagnostics    []protocol.Diagnostic
 	parseErr       error
 	resultID       string
@@ -58,20 +60,22 @@ func parseDocumentSnapshot(
 	facts := extractDDLFacts(index, statements)
 	ctes := extractCTEIndex(index, statements)
 	aliases := extractAliasIndex(index, statements, ctes)
+	selectAliases := extractSelectAliasIndex(index, statements, aliases)
 	snapshot := &documentSnapshot{
-		path:        path,
-		text:        text,
-		index:       index,
-		statements:  statements,
-		facts:       facts,
-		ctes:        ctes,
-		aliases:     aliases,
-		diagnostics: diagnosticsFromParseError(parseErr, text),
-		parseErr:    parseErr,
-		resultID:    fmt.Sprintf("%x", sha256.Sum256([]byte(text))),
-		version:     version,
-		revision:    revision,
-		origin:      origin,
+		path:          path,
+		text:          text,
+		index:         index,
+		statements:    statements,
+		facts:         facts,
+		ctes:          ctes,
+		aliases:       aliases,
+		selectAliases: selectAliases,
+		diagnostics:   diagnosticsFromParseError(parseErr, text),
+		parseErr:      parseErr,
+		resultID:      fmt.Sprintf("%x", sha256.Sum256([]byte(text))),
+		version:       version,
+		revision:      revision,
+		origin:        origin,
 	}
 	if previous != nil {
 		snapshot.lastSuccessful = previous.lastSuccessful
@@ -87,13 +91,14 @@ func parseDocumentSnapshot(
 
 func successfulSnapshot(snapshot *documentSnapshot) *successfulDocumentSnapshot {
 	return &successfulDocumentSnapshot{
-		text:       snapshot.text,
-		index:      snapshot.index,
-		statements: snapshot.statements,
-		facts:      snapshot.facts,
-		ctes:       snapshot.ctes,
-		aliases:    snapshot.aliases,
-		revision:   snapshot.revision,
+		text:          snapshot.text,
+		index:         snapshot.index,
+		statements:    snapshot.statements,
+		facts:         snapshot.facts,
+		ctes:          snapshot.ctes,
+		aliases:       snapshot.aliases,
+		selectAliases: snapshot.selectAliases,
+		revision:      snapshot.revision,
 	}
 }
 

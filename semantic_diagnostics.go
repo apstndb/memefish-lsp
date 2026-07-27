@@ -37,7 +37,8 @@ func (h *Handler) documentDiagnosticStateLocked(snapshot *documentSnapshot) ([]p
 func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protocol.Diagnostic {
 	var result []protocol.Diagnostic
 	for _, member := range snapshot.aliases.memberSites {
-		if member.binding.sourceTableName == "" {
+		if member.binding.sourceTableName == "" ||
+			snapshot.selectAliases.ambiguousAtPosition(member.range_.Start) {
 			continue
 		}
 		tables := h.tableFactMatchesLocked(member.binding.sourceTableName)
