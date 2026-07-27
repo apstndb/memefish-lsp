@@ -981,6 +981,9 @@ func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.Docume
 	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		return site.binding.highlights(), nil
 	}
+	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return site.binding.highlights(), nil
+	}
 	target, ok := identifierAtPosition(path, text, params.Position)
 	if !ok {
 		return nil, nil
@@ -1039,6 +1042,23 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 			Range: site.binding.declarationRange,
 		}}, nil
 	}
+	aliases := h.aliasIndexLocked(path, text)
+	if site, ok := aliases.siteAtPosition(params.Position); ok {
+		return []protocol.Location{{
+			URI:   params.TextDocument.URI,
+			Range: site.binding.declarationRange,
+		}}, nil
+	}
+	if member, ok := aliases.memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
+		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
+		if len(matches) == 1 {
+			return []protocol.Location{{
+				URI:   matches[0].uri,
+				Range: matches[0].column.name.selectionRange(),
+			}}, nil
+		}
+		return nil, nil
+	}
 	lex := newLexer(path, text)
 	target, ok := tableNameAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
@@ -1090,7 +1110,18 @@ func (h *Handler) TypeDefinition(ctx context.Context, params *protocol.TypeDefin
 	defer h.fileContentMu.Unlock()
 
 	path := params.TextDocument.URI.Path()
-	columnName, ok := identifierAtPosition(path, string(h.fileToContentMap[path]), params.Position)
+	text := string(h.fileToContentMap[path])
+	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
+		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
+		if len(matches) == 1 {
+			return []protocol.Location{{
+				URI:   matches[0].uri,
+				Range: matches[0].column.typeRange,
+			}}, nil
+		}
+		return []protocol.Location{}, nil
+	}
+	columnName, ok := identifierAtPosition(path, text, params.Position)
 	if !ok {
 		return []protocol.Location{}, nil
 	}
@@ -1112,6 +1143,9 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
 	if site, ok := h.cteIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
+	}
+	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
 		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
 	}
 	lex := newLexer(path, text)

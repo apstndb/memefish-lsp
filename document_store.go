@@ -25,6 +25,7 @@ type successfulDocumentSnapshot struct {
 	statements []ast.Statement
 	facts      documentFacts
 	ctes       cteIndex
+	aliases    aliasIndex
 	revision   uint64
 }
 
@@ -35,6 +36,7 @@ type documentSnapshot struct {
 	statements     []ast.Statement
 	facts          documentFacts
 	ctes           cteIndex
+	aliases        aliasIndex
 	diagnostics    []protocol.Diagnostic
 	parseErr       error
 	resultID       string
@@ -55,6 +57,7 @@ func parseDocumentSnapshot(
 	index := newTextIndex(text)
 	facts := extractDDLFacts(index, statements)
 	ctes := extractCTEIndex(index, statements)
+	aliases := extractAliasIndex(index, statements, ctes)
 	snapshot := &documentSnapshot{
 		path:        path,
 		text:        text,
@@ -62,6 +65,7 @@ func parseDocumentSnapshot(
 		statements:  statements,
 		facts:       facts,
 		ctes:        ctes,
+		aliases:     aliases,
 		diagnostics: diagnosticsFromParseError(parseErr, text),
 		parseErr:    parseErr,
 		resultID:    fmt.Sprintf("%x", sha256.Sum256([]byte(text))),
@@ -88,6 +92,7 @@ func successfulSnapshot(snapshot *documentSnapshot) *successfulDocumentSnapshot 
 		statements: snapshot.statements,
 		facts:      snapshot.facts,
 		ctes:       snapshot.ctes,
+		aliases:    snapshot.aliases,
 		revision:   snapshot.revision,
 	}
 }

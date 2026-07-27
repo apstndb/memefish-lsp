@@ -38,6 +38,7 @@ type tableColumnFact struct {
 	name             ddlName
 	schemaType       ast.SchemaType
 	declarationRange protocol.Range
+	typeRange        protocol.Range
 }
 
 type tableFact struct {
@@ -97,6 +98,7 @@ func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts 
 					name:             columnName,
 					schemaType:       column.Type,
 					declarationRange: nodeRange(index, column),
+					typeRange:        nodeRange(index, column.Type),
 				}
 				table.columns = append(table.columns, columnFact)
 				symbol.children = append(symbol.children, ddlSymbolFact{
