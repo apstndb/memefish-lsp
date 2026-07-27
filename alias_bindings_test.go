@@ -136,6 +136,93 @@ func TestExplicitTableAliasMemberNavigationAcrossDocuments(t *testing.T) {
 	}
 }
 
+func TestDefinitionResolvesDerivedTableColumns(t *testing.T) {
+	const text = `SELECT d.Id, d.Name
+FROM (SELECT SingerId AS Id, Name FROM Singers) AS d`
+	h := newParsedTestHandler(t, "/test.sql", text)
+	index := newTextIndex(text)
+
+	tests := []struct {
+		name              string
+		columnName        string
+		referenceOffset   int
+		declarationOffset int
+	}{
+		{
+			name:              "explicit",
+			columnName:        "Id",
+			referenceOffset:   strings.Index(text, "d.Id") + len("d."),
+			declarationOffset: strings.Index(text, " AS Id") + len(" AS "),
+		},
+		{
+			name:              "implicit",
+			columnName:        "Name",
+			referenceOffset:   strings.Index(text, "d.Name") + len("d."),
+			declarationOffset: strings.LastIndex(text, "Name"),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := h.Definition(context.Background(), &protocol.DefinitionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+					Position:     index.position(test.referenceOffset),
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := index.rangeByByteOffsets(
+				test.declarationOffset,
+				test.declarationOffset+len(test.columnName),
+			)
+			if len(got) != 1 || got[0].Range != want {
+				t.Fatalf("Definition() = %#v, want derived column %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestHoverDescribesDerivedTableColumn(t *testing.T) {
+	const text = `SELECT d.Id
+FROM (SELECT SingerId AS Id FROM Singers) AS d`
+	h := newParsedTestHandler(t, "/test.sql", text)
+	memberOffset := strings.Index(text, "d.Id") + len("d.")
+
+	got, err := h.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(memberOffset),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !strings.Contains(got.Contents.Value, "**Derived column** `d.Id`") ||
+		!strings.Contains(got.Contents.Value, "SingerId AS Id") {
+		t.Fatalf("Hover() = %#v, want derived output expression", got)
+	}
+}
+
+func TestDerivedColumnNavigationRejectsUnknownShape(t *testing.T) {
+	const text = `SELECT d.Id
+FROM (SELECT * FROM Singers) AS d`
+	h := newParsedTestHandler(t, "/test.sql", text)
+
+	got, err := h.Definition(context.Background(), &protocol.DefinitionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(strings.Index(text, "d.Id") + len("d.")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("Definition() = %#v, want none for SELECT * derived table", got)
+	}
+}
+
 func TestExplicitTableAliasRespectsNestedShadowing(t *testing.T) {
 	const text = "SELECT s.SingerId, (SELECT s.AlbumId FROM Albums AS s) FROM Singers AS s"
 	statements, err := memefish.ParseStatements("/test.sql", text)

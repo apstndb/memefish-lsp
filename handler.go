@@ -1285,6 +1285,12 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 				Range: column.name.selectionRange(),
 			}}, nil
 		}
+		if column, ok := member.binding.derivedColumn(member.name); ok {
+			return []protocol.Location{{
+				URI:   params.TextDocument.URI,
+				Range: column.name.selectionRange(),
+			}}, nil
+		}
 		if member.binding.sourceCTE != nil || member.binding.sourceTableName == "" {
 			return nil, nil
 		}
@@ -2030,6 +2036,16 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 				Contents: protocol.MarkupContent{
 					Kind: protocol.Markdown,
 					Value: "**CTE column** `" + member.binding.sourceCTE.name + "." + member.name +
+						"`\n\n```sql\n" + column.sql + "\n```",
+				},
+				Range: member.range_,
+			}, nil
+		}
+		if column, ok := member.binding.derivedColumn(member.name); ok {
+			return &protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind: protocol.Markdown,
+					Value: "**Derived column** `" + member.binding.name + "." + member.name +
 						"`\n\n```sql\n" + column.sql + "\n```",
 				},
 				Range: member.range_,

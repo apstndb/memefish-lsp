@@ -372,6 +372,18 @@ func (binding *aliasBinding) edits(newName string) []protocol.TextEdit {
 	return result
 }
 
+func (binding *aliasBinding) derivedColumn(name string) (queryColumnFact, bool) {
+	if binding == nil || !binding.sourceShapeKnown {
+		return queryColumnFact{}, false
+	}
+	for _, column := range binding.sourceColumns {
+		if strings.EqualFold(column.name.string(), name) {
+			return column, true
+		}
+	}
+	return queryColumnFact{}, false
+}
+
 func (h *Handler) aliasIndexLocked(path, text string) aliasIndex {
 	if snapshot := h.documents[path]; snapshot != nil {
 		return snapshot.aliases
