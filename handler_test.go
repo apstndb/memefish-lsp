@@ -611,6 +611,49 @@ func TestDiagnosticReportsUnknownCTEColumn(t *testing.T) {
 	}
 }
 
+func TestDiagnosticReportsUnknownDerivedTableColumn(t *testing.T) {
+	const query = "SELECT d.UnknownColumn FROM (SELECT 1 AS Id) AS d"
+	h := newParsedTestHandler(t, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 1 {
+		t.Fatalf("Diagnostic() items = %#v, want unknown derived-table column", full.Items)
+	}
+	diagnostic := full.Items[0]
+	if diagnostic.Code != unknownColumnDiagnosticCode ||
+		!strings.Contains(diagnostic.Message, `derived table "d"`) {
+		t.Fatalf("Diagnostic() item = %#v, want unknown derived-table column error", diagnostic)
+	}
+	if len(diagnostic.RelatedInformation) != 1 ||
+		diagnostic.RelatedInformation[0].Location.URI != "file:///query.sql" ||
+		diagnostic.RelatedInformation[0].Location.Range.Start !=
+			newTextIndex(query).position(strings.LastIndex(query, "d")) {
+		t.Fatalf("Diagnostic() related information = %#v, want derived-table alias declaration", diagnostic.RelatedInformation)
+	}
+}
+
+func TestDiagnosticSkipsUnknownDerivedTableShape(t *testing.T) {
+	const query = "SELECT d.UnknownColumn FROM (SELECT * FROM Singers) AS d"
+	h := newParsedTestHandler(t, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 0 {
+		t.Fatalf("Diagnostic() items = %#v, want none for unknown derived-table shape", full.Items)
+	}
+}
+
 func TestDiagnosticSkipsAmbiguousTableDefinitions(t *testing.T) {
 	const query = "SELECT s.UnknownColumn FROM Singers AS s"
 	h := newParsedTestHandler(t, "/query.sql", query)

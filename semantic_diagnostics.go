@@ -57,6 +57,19 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			))
 			continue
 		}
+		if member.binding.sourceShapeKnown {
+			if _, ok := member.binding.derivedColumn(member.name); ok {
+				continue
+			}
+			result = append(result, unknownAliasedColumnDiagnostic(
+				member,
+				"Derived table",
+				member.binding.name,
+				protocol.URIFromPath(snapshot.path),
+				member.binding.declarationRange,
+			))
+			continue
+		}
 		if member.binding.sourceTableName == "" {
 			continue
 		}
