@@ -1002,6 +1002,53 @@ func TestHoverDescribesUniqueColumn(t *testing.T) {
 	}
 }
 
+func TestHoverDescribesColumnThroughExplicitTableAlias(t *testing.T) {
+	const query = "SELECT s.Id FROM Singers AS s"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", `
+CREATE TABLE Singers (Id INT64) PRIMARY KEY (Id);
+CREATE TABLE Albums (Id STRING(MAX)) PRIMARY KEY (Id)`)
+
+	got, err := h.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "Id")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !strings.Contains(got.Contents.Value, "`Singers.Id`") ||
+		!strings.Contains(got.Contents.Value, "Id INT64") {
+		t.Fatalf("Hover() = %#v, want Singers.Id definition", got)
+	}
+	wantRange := newTextIndex(query).rangeByByteOffsets(strings.Index(query, "Id"), strings.Index(query, "Id")+len("Id"))
+	if got.Range != wantRange {
+		t.Fatalf("Hover() range = %#v, want member range %#v", got.Range, wantRange)
+	}
+}
+
+func TestHoverDoesNotBorrowColumnFromDifferentTable(t *testing.T) {
+	const query = "SELECT s.AlbumId FROM Singers AS s"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", `
+CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);
+CREATE TABLE Albums (AlbumId INT64) PRIMARY KEY (AlbumId)`)
+
+	got, err := h.Hover(context.Background(), &protocol.HoverParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "AlbumId")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("Hover() = %#v, want nil for a column absent from Singers", got)
+	}
+}
+
 func TestSymbolReturnsFuzzyMatchedSchemaSymbolsAcrossOpenDocuments(t *testing.T) {
 	h := NewHandler(slog.Default(), nil)
 	addParsedTestDocument(t, h, "/singers.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")

@@ -37,6 +37,7 @@ func (name ddlName) selectionRange() protocol.Range {
 type tableColumnFact struct {
 	name             ddlName
 	schemaType       ast.SchemaType
+	sql              string
 	declarationRange protocol.Range
 	typeRange        protocol.Range
 }
@@ -97,6 +98,7 @@ func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts 
 				columnFact := tableColumnFact{
 					name:             columnName,
 					schemaType:       column.Type,
+					sql:              column.SQL(),
 					declarationRange: nodeRange(index, column),
 					typeRange:        nodeRange(index, column.Type),
 				}

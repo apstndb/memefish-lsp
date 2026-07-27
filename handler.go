@@ -1666,6 +1666,21 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
 	lex := newLexer(path, text)
+	if member, ok := h.aliasIndexLocked(path, text).memberAtPosition(params.Position); ok && member.binding.sourceTableName != "" {
+		matches := h.tableColumnFactMatchesLocked(member.binding.sourceTableName, member.name)
+		if len(matches) != 1 {
+			return nil, nil
+		}
+		match := matches[0]
+		return &protocol.Hover{
+			Contents: protocol.MarkupContent{
+				Kind: protocol.Markdown,
+				Value: "**Column** `" + member.binding.sourceTableName + "." + member.name +
+					"`\n\n```sql\n" + match.column.sql + "\n```",
+			},
+			Range: member.range_,
+		}, nil
+	}
 	if tableSymbol, ok := simpleTableSymbolAtPosition(lex, h.parsedMap[path], params.Position); ok {
 		matches := h.createTableMatches(tableSymbol.Name)
 		if len(matches) == 1 {
