@@ -351,3 +351,53 @@ func TestDiagnosticResultChangesWithViewShape(t *testing.T) {
 		t.Fatalf("Diagnostic() result ID did not change after view update: %q", secondFull.ResultID)
 	}
 }
+
+func TestCompletionIncludesWorkspaceViewIdentifiers(t *testing.T) {
+	const query = "SELECT * FROM Act"
+	const view = "CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS SELECT SingerId AS Id FROM Singers"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", view)
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(len(query)),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range got.Items {
+		if item.Label == "ActiveSingers" &&
+			item.Kind == protocol.ReferenceCompletion &&
+			item.Detail == "view in workspace" {
+			return
+		}
+	}
+	t.Fatalf("Completion() items = %#v, want workspace ActiveSingers view", got.Items)
+}
+
+func TestCompletionIncludesKnownWorkspaceViewColumns(t *testing.T) {
+	const query = "SELECT I"
+	const view = "CREATE VIEW ActiveSingers SQL SECURITY INVOKER AS SELECT SingerId AS Id FROM Singers"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", view)
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(len(query)),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range got.Items {
+		if item.Label == "Id" &&
+			item.Kind == protocol.FieldCompletion &&
+			item.Detail == "column in workspace view" {
+			return
+		}
+	}
+	t.Fatalf("Completion() items = %#v, want known view column Id", got.Items)
+}

@@ -885,7 +885,7 @@ func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionPar
 
 	prefix := completionPrefixAt(text, params.Position)
 	items := completionItems(text, prefix)
-	items = appendWorkspaceCompletionItems(items, h.parsedMap, prefix)
+	items = h.appendWorkspaceCompletionItemsLocked(items, prefix)
 
 	return &protocol.CompletionList{
 		IsIncomplete: false,
@@ -1008,7 +1008,7 @@ func repairedAliasBinding(
 	return tableAliases.bindingAtPosition(qualifier, qualifierPosition)
 }
 
-func appendWorkspaceCompletionItems(items []protocol.CompletionItem, parsed map[string][]ast.Statement, prefix string) []protocol.CompletionItem {
+func (h *Handler) appendWorkspaceCompletionItemsLocked(items []protocol.CompletionItem, prefix string) []protocol.CompletionItem {
 	seen := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		seen[strings.ToUpper(item.Label)] = struct{}{}
@@ -1024,19 +1024,28 @@ func appendWorkspaceCompletionItems(items []protocol.CompletionItem, parsed map[
 		seen[key] = struct{}{}
 		items = append(items, protocol.CompletionItem{Label: label, Kind: kind, Detail: detail})
 	}
-	for _, stmts := range parsed {
-		memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-			table, ok := node.(*ast.CreateTable)
-			if !ok {
-				return true
+	for path, content := range h.fileToContentMap {
+		var facts documentFacts
+		if snapshot := h.documents[path]; snapshot != nil {
+			facts = snapshot.facts
+		} else {
+			facts = extractDDLFacts(newTextIndex(string(content)), h.parsedMap[path])
+		}
+		for _, table := range facts.tables {
+			add(table.name.string(), protocol.StructCompletion, "table in workspace")
+			for _, column := range table.columns {
+				add(column.name.string(), protocol.FieldCompletion, "column in workspace schema")
 			}
-			tableName := pathName(table.Name)
-			add(tableName, protocol.StructCompletion, "table in workspace")
-			for _, column := range table.Columns {
-				add(identName(column.Name), protocol.FieldCompletion, "column in workspace schema")
+		}
+		for _, view := range facts.views {
+			add(view.name.string(), protocol.ReferenceCompletion, "view in workspace")
+			if !view.shapeKnown {
+				continue
 			}
-			return false
-		})
+			for _, column := range view.columns {
+				add(column.name.string(), protocol.FieldCompletion, "column in workspace view")
+			}
+		}
 	}
 	slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
 		return strings.Compare(strings.ToUpper(a.Label), strings.ToUpper(b.Label))
