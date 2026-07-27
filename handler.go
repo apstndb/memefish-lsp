@@ -629,7 +629,12 @@ func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureH
 	defer h.fileContentMu.Unlock()
 
 	path := params.TextDocument.URI.Path()
-	name, activeParameter, ok := activeFunctionCall(path, string(h.fileToContentMap[path]), params.Position)
+	text := string(h.fileToContentMap[path])
+	statements := h.parsedMap[path]
+	if snapshot := h.documents[path]; snapshot != nil {
+		statements = snapshot.statements
+	}
+	name, activeParameter, ok := activeFunctionCall(path, text, statements, params.Position)
 	if !ok {
 		return nil, nil
 	}
@@ -654,7 +659,18 @@ func (h *Handler) SignatureHelp(ctx context.Context, params *protocol.SignatureH
 	}, nil
 }
 
-func activeFunctionCall(path, text string, pos protocol.Position) (string, uint32, bool) {
+func activeFunctionCall(
+	path, text string,
+	statements []ast.Statement,
+	pos protocol.Position,
+) (string, uint32, bool) {
+	if name, activeParameter, ok := activeASTFunctionCall(newTextIndex(text), statements, pos); ok {
+		return name, activeParameter, true
+	}
+	return activeIncompleteFunctionCall(path, text, pos)
+}
+
+func activeIncompleteFunctionCall(path, text string, pos protocol.Position) (string, uint32, bool) {
 	type callFrame struct {
 		name            string
 		activeParameter uint32

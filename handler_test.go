@@ -141,6 +141,50 @@ func TestSignatureHelpIgnoresUnknownFunction(t *testing.T) {
 	}
 }
 
+func TestSignatureHelpUsesASTForParenthesizedArgument(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT IF((1 + 2) > 0, 3, 4)"
+	h := newParsedTestHandler(t, path, text)
+
+	got, err := h.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(strings.Index(text, "2)")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Signatures[0].Label != "IF(expr, true_result, else_result)" {
+		t.Fatalf("SignatureHelp() = %#v, want IF signature", got)
+	}
+	if got.ActiveParameter == nil || *got.ActiveParameter != 0 {
+		t.Fatalf("SignatureHelp() active parameter = %#v, want 0", got.ActiveParameter)
+	}
+}
+
+func TestSignatureHelpUsesASTForArrayArgumentCommas(t *testing.T) {
+	const path = "/test.sql"
+	const text = "SELECT IF([TRUE, FALSE][OFFSET(0)], 3, 4)"
+	h := newParsedTestHandler(t, path, text)
+
+	got, err := h.SignatureHelp(context.Background(), &protocol.SignatureHelpParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(strings.Index(text, "], 3")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Signatures[0].Label != "IF(expr, true_result, else_result)" {
+		t.Fatalf("SignatureHelp() = %#v, want outer IF signature", got)
+	}
+	if got.ActiveParameter == nil || *got.ActiveParameter != 0 {
+		t.Fatalf("SignatureHelp() active parameter = %#v, want 0", got.ActiveParameter)
+	}
+}
+
 func TestCompletionPrefixAt(t *testing.T) {
 	got := completionPrefixAt("SELECT singer_id", protocol.Position{Line: 0, Character: 9})
 	if got != "si" {
