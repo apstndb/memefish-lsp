@@ -144,7 +144,7 @@ CREATE TABLE Albums (AlbumId INT64) PRIMARY KEY (AlbumId)`)
 	}
 }
 
-func TestCompletionRejectsUnknownAliasShape(t *testing.T) {
+func TestCompletionUsesKnownCTEShape(t *testing.T) {
 	const query = "WITH LocalRows AS (SELECT 1 AS Id) SELECT r.I FROM LocalRows AS r"
 	h := newParsedTestHandler(t, "/query.sql", query)
 	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE LocalRows (IgnoredId INT64) PRIMARY KEY (IgnoredId)")
@@ -158,8 +158,52 @@ func TestCompletionRejectsUnknownAliasShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(got.Items) != 1 ||
+		got.Items[0].Label != "Id" ||
+		got.Items[0].Detail != "column of CTE LocalRows" {
+		t.Fatalf("Completion() items = %#v, want CTE output column Id", got.Items)
+	}
+}
+
+func TestCompletionRejectsUnknownCTEShape(t *testing.T) {
+	const query = "WITH LocalRows AS (SELECT * FROM Singers) SELECT r.I FROM LocalRows AS r"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (Id INT64) PRIMARY KEY (Id)")
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "I FROM") + len("I")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got.Items) != 0 {
-		t.Fatalf("Completion() items = %#v, want none for CTE-backed alias", got.Items)
+		t.Fatalf("Completion() items = %#v, want none for SELECT * CTE shape", got.Items)
+	}
+}
+
+func TestCompletionUsesInnermostCTEShape(t *testing.T) {
+	const query = `WITH T AS (SELECT 1 AS OuterId),
+U AS (WITH T AS (SELECT 2 AS InnerId) SELECT t.InnerId FROM T AS t)
+SELECT * FROM U`
+	h := newParsedTestHandler(t, "/query.sql", query)
+	memberOffset := strings.Index(query, "t.InnerId") + len("t.In")
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(memberOffset),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 1 ||
+		got.Items[0].Label != "InnerId" ||
+		got.Items[0].Detail != "column of CTE T" {
+		t.Fatalf("Completion() items = %#v, want inner CTE column InnerId", got.Items)
 	}
 }
 

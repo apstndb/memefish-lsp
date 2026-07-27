@@ -15,6 +15,7 @@ type aliasBinding struct {
 	declarationRange protocol.Range
 	referenceRanges  []protocol.Range
 	sourceTableName  string
+	sourceCTE        *cteBinding
 	ambiguous        bool
 }
 
@@ -139,26 +140,28 @@ func collectTableAliases(
 	switch table := table.(type) {
 	case *ast.TableName:
 		sourceName := identName(table.Table)
-		if ctes.bindsReference(nodeRange(index, table.Table)) {
+		sourceCTE, cteBound := ctes.bindingForReference(nodeRange(index, table.Table))
+		if cteBound {
 			sourceName = ""
 		}
-		addTableAlias(index, table.As, sourceName, scope, localNames, result)
+		addTableAlias(index, table.As, sourceName, sourceCTE, scope, localNames, result)
 	case *ast.PathTableExpr:
 		sourcePaths[nodeRange(index, table.Path)] = struct{}{}
 		sourceName := pathName(table.Path)
-		if ctes.bindsReference(nodeRange(index, table.Path)) {
+		sourceCTE, cteBound := ctes.bindingForReference(nodeRange(index, table.Path))
+		if cteBound {
 			sourceName = ""
 		}
-		addTableAlias(index, table.As, sourceName, scope, localNames, result)
+		addTableAlias(index, table.As, sourceName, sourceCTE, scope, localNames, result)
 		if table.WithOffset != nil {
-			addTableAlias(index, table.WithOffset.As, "", scope, localNames, result)
+			addTableAlias(index, table.WithOffset.As, "", nil, scope, localNames, result)
 		}
 	case *ast.SubQueryTableExpr:
-		addTableAlias(index, table.As, "", scope, localNames, result)
+		addTableAlias(index, table.As, "", nil, scope, localNames, result)
 	case *ast.Unnest:
-		addTableAlias(index, table.As, "", scope, localNames, result)
+		addTableAlias(index, table.As, "", nil, scope, localNames, result)
 		if table.WithOffset != nil {
-			addTableAlias(index, table.WithOffset.As, "", scope, localNames, result)
+			addTableAlias(index, table.WithOffset.As, "", nil, scope, localNames, result)
 		}
 	case *ast.ParenTableExpr:
 		collectTableAliases(index, table.Source, scope, localNames, sourcePaths, ctes, result)
@@ -172,6 +175,7 @@ func addTableAlias(
 	index textIndex,
 	as *ast.AsAlias,
 	sourceTableName string,
+	sourceCTE *cteBinding,
 	scope map[string]*aliasBinding,
 	localNames map[string]struct{},
 	result *aliasIndex,
@@ -184,6 +188,7 @@ func addTableAlias(
 		name:             name,
 		declarationRange: nodeRange(index, as.Alias),
 		sourceTableName:  sourceTableName,
+		sourceCTE:        sourceCTE,
 	}
 	result.bindings = append(result.bindings, binding)
 	result.sites = append(result.sites, aliasSite{
@@ -376,7 +381,7 @@ type tableColumnFactMatch struct {
 type viewColumnFactMatch struct {
 	uri      protocol.DocumentURI
 	viewName string
-	column   viewColumnFact
+	column   queryColumnFact
 }
 
 type tableFactMatch struct {

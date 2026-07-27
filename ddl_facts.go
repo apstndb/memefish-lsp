@@ -52,11 +52,11 @@ type viewFact struct {
 	name             ddlName
 	sql              string
 	declarationRange protocol.Range
-	columns          []viewColumnFact
+	columns          []queryColumnFact
 	shapeKnown       bool
 }
 
-type viewColumnFact struct {
+type queryColumnFact struct {
 	name ddlName
 	sql  string
 }
@@ -130,7 +130,7 @@ func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts 
 		case *ast.CreateView:
 			name := ddlNameFromPath(index, node.Name)
 			if add(node, name, protocol.Object, "") != nil {
-				columns, shapeKnown := extractViewColumnFacts(index, node.Query)
+				columns, shapeKnown := extractQueryColumnFacts(index, node.Query)
 				facts.views = append(facts.views, viewFact{
 					name:             name,
 					sql:              node.SQL(),
@@ -160,13 +160,13 @@ func extractDDLFacts(index textIndex, statements []ast.Statement) documentFacts 
 	return facts
 }
 
-func extractViewColumnFacts(index textIndex, query ast.QueryExpr) ([]viewColumnFact, bool) {
+func extractQueryColumnFacts(index textIndex, query ast.QueryExpr) ([]queryColumnFact, bool) {
 	selectExpr, ok := query.(*ast.Select)
 	if !ok {
 		return nil, false
 	}
 	seen := make(map[string]struct{})
-	columns := make([]viewColumnFact, 0, len(selectExpr.Results))
+	columns := make([]queryColumnFact, 0, len(selectExpr.Results))
 	for _, item := range selectExpr.Results {
 		ident, _ := selectItemAlias(item)
 		if ident == nil {
@@ -178,7 +178,7 @@ func extractViewColumnFacts(index textIndex, query ast.QueryExpr) ([]viewColumnF
 			return nil, false
 		}
 		seen[key] = struct{}{}
-		columns = append(columns, viewColumnFact{
+		columns = append(columns, queryColumnFact{
 			name: ddlNameFromIdent(index, ident),
 			sql:  item.SQL(),
 		})

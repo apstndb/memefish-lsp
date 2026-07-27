@@ -14,6 +14,8 @@ type cteBinding struct {
 	name             string
 	declarationRange protocol.Range
 	referenceRanges  []protocol.Range
+	columns          []queryColumnFact
+	shapeKnown       bool
 }
 
 type cteSite struct {
@@ -70,9 +72,12 @@ func indexQueryCTEs(index textIndex, query *ast.Query, outerScope map[string]*ct
 			// but not its own declaration.
 			indexCTENode(index, cte.QueryExpr, scope, result)
 			name := ddlNameFromIdent(index, cte.Name)
+			columns, shapeKnown := extractQueryColumnFacts(index, cte.QueryExpr)
 			binding := &cteBinding{
 				name:             name.string(),
 				declarationRange: name.selectionRange(),
+				columns:          columns,
+				shapeKnown:       shapeKnown,
 			}
 			result.bindings = append(result.bindings, binding)
 			result.sites = append(result.sites, cteSite{
@@ -126,12 +131,17 @@ func (index cteIndex) siteAtPosition(pos protocol.Position) (cteSite, bool) {
 }
 
 func (index cteIndex) bindsReference(target protocol.Range) bool {
+	_, ok := index.bindingForReference(target)
+	return ok
+}
+
+func (index cteIndex) bindingForReference(target protocol.Range) (*cteBinding, bool) {
 	for _, site := range index.sites {
 		if !site.declaration && site.range_ == target {
-			return true
+			return site.binding, true
 		}
 	}
-	return false
+	return nil, false
 }
 
 func (binding *cteBinding) locations(uri protocol.DocumentURI, includeDeclaration bool) []protocol.Location {

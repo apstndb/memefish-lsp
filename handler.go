@@ -938,7 +938,30 @@ func (h *Handler) aliasMemberCompletionItemsLocked(
 	if !ok {
 		binding, ok = repairedAliasBinding(path, text, qualifier, qualifierPosition, cursorPosition)
 	}
-	if !ok || binding.sourceTableName == "" {
+	if !ok {
+		return []protocol.CompletionItem{}
+	}
+	if binding.sourceCTE != nil {
+		if !binding.sourceCTE.shapeKnown {
+			return []protocol.CompletionItem{}
+		}
+		var items []protocol.CompletionItem
+		for _, column := range binding.sourceCTE.columns {
+			name := column.name.string()
+			if strings.HasPrefix(strings.ToUpper(name), strings.ToUpper(prefix)) {
+				items = append(items, protocol.CompletionItem{
+					Label:  name,
+					Kind:   protocol.FieldCompletion,
+					Detail: "column of CTE " + binding.sourceCTE.name,
+				})
+			}
+		}
+		slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
+			return strings.Compare(strings.ToUpper(a.Label), strings.ToUpper(b.Label))
+		})
+		return items
+	}
+	if binding.sourceTableName == "" {
 		return []protocol.CompletionItem{}
 	}
 	tables := h.tableFactMatchesLocked(binding.sourceTableName)
