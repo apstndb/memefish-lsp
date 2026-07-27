@@ -528,6 +528,66 @@ func TestDiagnosticReportsUnknownColumnOnExplicitTableAlias(t *testing.T) {
 	}
 }
 
+func TestDiagnosticReportsInvalidSelectOrdinals(t *testing.T) {
+	const query = "SELECT SingerId FROM Singers GROUP BY 2 ORDER BY 0"
+	h := newParsedTestHandler(t, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 2 {
+		t.Fatalf("Diagnostic() items = %#v, want GROUP BY and ORDER BY ordinal errors", full.Items)
+	}
+	index := newTextIndex(query)
+	wantStarts := []protocol.Position{
+		index.position(strings.Index(query, "2")),
+		index.position(strings.LastIndex(query, "0")),
+	}
+	for i, diagnostic := range full.Items {
+		if diagnostic.Code != invalidSelectOrdinalDiagnosticCode ||
+			diagnostic.Severity != protocol.SeverityError ||
+			diagnostic.Range.Start != wantStarts[i] {
+			t.Fatalf("Diagnostic() item %d = %#v, want invalid ordinal at %#v", i, diagnostic, wantStarts[i])
+		}
+	}
+}
+
+func TestDiagnosticAcceptsValidSelectOrdinals(t *testing.T) {
+	const query = "SELECT SingerId, Name FROM Singers GROUP BY 1, 2 ORDER BY 2"
+	h := newParsedTestHandler(t, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 0 {
+		t.Fatalf("Diagnostic() items = %#v, want valid ordinals", full.Items)
+	}
+}
+
+func TestDiagnosticSkipsUnknownSelectOrdinalShape(t *testing.T) {
+	const query = "SELECT * FROM Singers GROUP BY 2 ORDER BY 2"
+	h := newParsedTestHandler(t, "/query.sql", query)
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if len(full.Items) != 0 {
+		t.Fatalf("Diagnostic() items = %#v, want none for SELECT * output shape", full.Items)
+	}
+}
+
 func TestDiagnosticUnknownColumnResultChangesWithSchema(t *testing.T) {
 	const query = "SELECT s.Name FROM Singers AS s"
 	h := newParsedTestHandler(t, "/query.sql", query)

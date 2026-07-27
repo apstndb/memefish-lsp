@@ -1,16 +1,24 @@
 package main
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/apstndb/go-lsp-export/protocol"
+	"github.com/cloudspannerecosystem/memefish/ast"
+
+	"github.com/apstndb/memefish-lsp/memewalk"
 )
 
-const unknownColumnDiagnosticCode = "unknown-column"
+const (
+	unknownColumnDiagnosticCode        = "unknown-column"
+	invalidSelectOrdinalDiagnosticCode = "invalid-select-ordinal"
+)
 
 type diagnosticSchemaColumn struct {
 	Name string
@@ -36,7 +44,7 @@ func (h *Handler) documentDiagnosticStateLocked(snapshot *documentSnapshot) ([]p
 }
 
 func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protocol.Diagnostic {
-	var result []protocol.Diagnostic
+	result := selectOrdinalDiagnostics(snapshot)
 	for _, member := range snapshot.aliases.memberSites {
 		if snapshot.selectAliases.ambiguousAtPosition(member.range_.Start) {
 			continue
@@ -109,7 +117,88 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			declarationRange,
 		))
 	}
+	slices.SortFunc(result, func(a, b protocol.Diagnostic) int {
+		return cmp.Or(
+			comparePosition(a.Range.Start, b.Range.Start),
+			comparePosition(a.Range.End, b.Range.End),
+			strings.Compare(fmt.Sprint(a.Code), fmt.Sprint(b.Code)),
+		)
+	})
 	return result
+}
+
+func selectOrdinalDiagnostics(snapshot *documentSnapshot) []protocol.Diagnostic {
+	var result []protocol.Diagnostic
+	memewalk.InspectSlice(snapshot.statements, func(path []string, node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.Select:
+			if node.GroupBy == nil {
+				break
+			}
+			_, countKnown := extractColumnName(node)
+			if !countKnown {
+				break
+			}
+			for _, expr := range node.GroupBy.Exprs {
+				if literal, ok := expr.(*ast.IntLiteral); ok {
+					if diagnostic, invalid := invalidOrdinalDiagnostic(
+						snapshot.index,
+						literal,
+						"GROUP BY",
+						len(node.Results),
+					); invalid {
+						result = append(result, diagnostic)
+					}
+				}
+			}
+		case *ast.Query:
+			if node.OrderBy == nil {
+				break
+			}
+			names, countKnown := extractColumnName(node.Query)
+			if !countKnown {
+				break
+			}
+			for _, item := range node.OrderBy.Items {
+				if literal, ok := item.Expr.(*ast.IntLiteral); ok {
+					if diagnostic, invalid := invalidOrdinalDiagnostic(
+						snapshot.index,
+						literal,
+						"ORDER BY",
+						len(names),
+					); invalid {
+						result = append(result, diagnostic)
+					}
+				}
+			}
+		}
+		return true
+	})
+	return result
+}
+
+func invalidOrdinalDiagnostic(
+	index textIndex,
+	literal *ast.IntLiteral,
+	clause string,
+	selectItemCount int,
+) (protocol.Diagnostic, bool) {
+	ordinal, err := strconv.ParseInt(literal.Value, literal.Base, 64)
+	if err == nil && ordinal > 0 && ordinal <= int64(selectItemCount) {
+		return protocol.Diagnostic{}, false
+	}
+	return protocol.Diagnostic{
+		Range:    nodeRange(index, literal),
+		Severity: protocol.SeverityError,
+		Code:     invalidSelectOrdinalDiagnosticCode,
+		Source:   "memefish-lsp",
+		Message: fmt.Sprintf(
+			"%s ordinal %s is outside the select list of %d item(s).",
+			clause,
+			literal.SQL(),
+			selectItemCount,
+		),
+	}, true
 }
 
 func unknownAliasedColumnDiagnostic(
