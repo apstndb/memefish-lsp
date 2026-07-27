@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf16"
 
 	"github.com/cloudspannerecosystem/memefish"
 	"github.com/cloudspannerecosystem/memefish/ast"
@@ -109,7 +108,7 @@ func (h *Handler) SelectionRange(ctx context.Context, params *protocol.Selection
 	return result, nil
 }
 
-func selectionRangeAtPosition(logger *slog.Logger, lex *memefish.Lexer, stmts []ast.Statement, pos protocol.Position) protocol.SelectionRange {
+func selectionRangeAtPosition(logger *slog.Logger, lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) protocol.SelectionRange {
 	var current *protocol.SelectionRange
 	for _, elem := range findNodesByPos(logger, lex, stmts, pos) {
 		r := rangeByNode(lex, elem.Node)
@@ -134,11 +133,8 @@ func fullname(idents []*ast.Ident) string {
 	}), ".")
 }
 
-func rangeByNode(lex *memefish.Lexer, node ast.Node) protocol.Range {
-	return protocol.Range{
-		Start: positionByPos(lex, node.Pos()),
-		End:   positionByPos(lex, node.End()),
-	}
+func rangeByNode(lex *sourceLexer, node ast.Node) protocol.Range {
+	return lex.index.rangeByByteOffsets(int(node.Pos()), int(node.End()))
 }
 
 func (h *Handler) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]interface{}, error) {
@@ -197,7 +193,7 @@ func (h *Handler) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolPa
 
 func workspaceSymbols(
 	uri protocol.DocumentURI,
-	lex *memefish.Lexer,
+	lex *sourceLexer,
 	stmts []ast.Statement,
 	query string,
 ) []protocol.SymbolInformation {
@@ -500,7 +496,7 @@ func codeActionKindRequested(only []protocol.CodeActionKind, kind protocol.CodeA
 	return false
 }
 
-func generateInlayHintForSelectItems(lex *memefish.Lexer, query ast.QueryExpr, columnNames []string) []protocol.InlayHint {
+func generateInlayHintForSelectItems(lex *sourceLexer, query ast.QueryExpr, columnNames []string) []protocol.InlayHint {
 	var result []protocol.InlayHint
 	if sq, ok := query.(*ast.SubQuery); ok {
 		query = sq.Query
@@ -540,7 +536,7 @@ func generateInlayHintForSelectItems(lex *memefish.Lexer, query ast.QueryExpr, c
 	return result
 }
 
-func newInlayHint(lex *memefish.Lexer, parameter protocol.InlayHintKind, pos token.Pos, value string) protocol.InlayHint {
+func newInlayHint(lex *sourceLexer, parameter protocol.InlayHintKind, pos token.Pos, value string) protocol.InlayHint {
 	position := positionByPos(lex, pos)
 	hint := protocol.InlayHint{
 		Position: position,
@@ -552,13 +548,8 @@ func newInlayHint(lex *memefish.Lexer, parameter protocol.InlayHintKind, pos tok
 	return hint
 }
 
-func positionByPos(lex *memefish.Lexer, pos token.Pos) protocol.Position {
-	line, char := lex.ResolvePos(pos)
-	position := protocol.Position{
-		Line:      uint32(line),
-		Character: uint32(char),
-	}
-	return position
+func positionByPos(lex *sourceLexer, pos token.Pos) protocol.Position {
+	return lex.index.position(int(pos))
 }
 
 func (h *Handler) SetClient(client protocol.Client) {
@@ -710,7 +701,7 @@ func activeFunctionCall(path, text string, pos protocol.Position) (string, uint3
 	lex := newLexer(path, text)
 	frames := []callFrame{}
 	var previous token.Token
-	for tok, err := range gsqlutils.LexerSeq(lex) {
+	for tok, err := range gsqlutils.LexerSeq(lex.Lexer) {
 		if err != nil || comparePosition(positionByPos(lex, tok.Pos), pos) >= 0 {
 			break
 		}
@@ -851,7 +842,7 @@ func formatGoogleSQL(path, text string) (string, bool) {
 
 func documentHasComments(path, text string) bool {
 	lex := newLexer(path, text)
-	for tok, err := range gsqlutils.LexerSeq(lex) {
+	for tok, err := range gsqlutils.LexerSeq(lex.Lexer) {
 		if err != nil || len(tok.Comments) > 0 {
 			return true
 		}
@@ -861,7 +852,7 @@ func documentHasComments(path, text string) bool {
 
 func rangeHasComments(path, text string, target protocol.Range) bool {
 	lex := newLexer(path, text)
-	for tok, err := range gsqlutils.LexerSeq(lex) {
+	for tok, err := range gsqlutils.LexerSeq(lex.Lexer) {
 		if err != nil {
 			return true
 		}
@@ -891,12 +882,7 @@ func comparePosition(a, b protocol.Position) int {
 }
 
 func documentEndPosition(text string) protocol.Position {
-	lines := strings.Split(text, "\n")
-	lastLine := lines[len(lines)-1]
-	return protocol.Position{
-		Line:      uint32(len(lines) - 1),
-		Character: uint32(len(utf16.Encode([]rune(lastLine)))),
-	}
+	return newTextIndex(text).position(len(text))
 }
 
 func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
@@ -991,7 +977,7 @@ func completionItems(text, prefix string) []protocol.CompletionItem {
 	}
 
 	lex := newLexer("", text)
-	for tok, err := range gsqlutils.LexerSeq(lex) {
+	for tok, err := range gsqlutils.LexerSeq(lex.Lexer) {
 		if err != nil {
 			break
 		}
@@ -1007,21 +993,17 @@ func completionItems(text, prefix string) []protocol.CompletionItem {
 }
 
 func completionPrefixAt(text string, pos protocol.Position) string {
-	line := lineAt(text, int(pos.Line))
-	char := min(int(pos.Character), len(line))
-	start := char
-	for start > 0 && isIdentChar(line[start-1]) {
-		start--
-	}
-	return line[start:char]
-}
-
-func lineAt(text string, lineNo int) string {
-	lines := strings.Split(text, "\n")
-	if lineNo < 0 || lineNo >= len(lines) {
+	index := newTextIndex(text)
+	offset, ok := index.byteOffset(pos)
+	if !ok {
 		return ""
 	}
-	return lines[lineNo]
+	start := offset
+	lineStart := index.lineStarts[min(int(pos.Line), len(index.lineStarts)-1)]
+	for start > lineStart && isIdentChar(text[start-1]) {
+		start--
+	}
+	return text[start:offset]
 }
 
 func isIdentChar(b byte) bool {
@@ -1041,7 +1023,7 @@ func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.Docume
 
 	lex := newLexer(path, text)
 	var result []protocol.DocumentHighlight
-	for tok, err := range gsqlutils.LexerSeq(lex) {
+	for tok, err := range gsqlutils.LexerSeq(lex.Lexer) {
 		if err != nil {
 			break
 		}
@@ -1062,22 +1044,22 @@ func identifierAtPosition(path, text string, pos protocol.Position) (string, boo
 
 func identifierAtPositionWithRange(path, text string, pos protocol.Position) (string, protocol.Range, bool) {
 	lex := newLexer(path, text)
-	for tok, err := range gsqlutils.LexerSeq(lex) {
+	for tok, err := range gsqlutils.LexerSeq(lex.Lexer) {
 		if err != nil {
 			return "", protocol.Range{}, false
 		}
 		if tok.Kind != token.TokenIdent {
 			continue
 		}
-		if include(lex.Position(tok.Pos, tok.End), pos) {
+		if include(lex, lex.Position(tok.Pos, tok.End), pos) {
 			return tok.AsString, tokenRange(lex, tok.Pos, tok.End), true
 		}
 	}
 	return "", protocol.Range{}, false
 }
 
-func tokenRange(lex *memefish.Lexer, pos, end token.Pos) protocol.Range {
-	return toProtocolRange(lex.Position(pos, end))
+func tokenRange(lex *sourceLexer, pos, end token.Pos) protocol.Range {
+	return lex.index.rangeByByteOffsets(int(pos), int(end))
 }
 
 func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionParams) ([]protocol.Location, error) {
@@ -1193,7 +1175,7 @@ func compareLocations(a, b protocol.Location) int {
 	)
 }
 
-func tableReferenceLocations(uri protocol.DocumentURI, lex *memefish.Lexer, stmts []ast.Statement, target string) []protocol.Location {
+func tableReferenceLocations(uri protocol.DocumentURI, lex *sourceLexer, stmts []ast.Statement, target string) []protocol.Location {
 	result := []protocol.Location{}
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
 		switch n := node.(type) {
@@ -1379,7 +1361,7 @@ type tableSymbol struct {
 	Range protocol.Range
 }
 
-func simpleTableSymbolAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
+func simpleTableSymbolAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
 	var result tableSymbol
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
 		if result.Name != "" {
@@ -1387,19 +1369,19 @@ func simpleTableSymbolAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos
 		}
 		switch n := node.(type) {
 		case *ast.CreateTable:
-			if !isSimplePath(n.Name) || !include(positionByNode(lex, n.Name), pos) {
+			if !isSimplePath(n.Name) || !include(lex, positionByNode(lex, n.Name), pos) {
 				return true
 			}
 			result = tableSymbol{Name: pathName(n.Name), Range: rangeByNode(lex, n.Name)}
 			return false
 		case *ast.PathTableExpr:
-			if !isSimplePath(n.Path) || !include(positionByNode(lex, n.Path), pos) {
+			if !isSimplePath(n.Path) || !include(lex, positionByNode(lex, n.Path), pos) {
 				return true
 			}
 			result = tableSymbol{Name: pathName(n.Path), Range: rangeByNode(lex, n.Path)}
 			return false
 		case *ast.TableName:
-			if !include(positionByNode(lex, n.Table), pos) {
+			if !include(lex, positionByNode(lex, n.Table), pos) {
 				return true
 			}
 			result = tableSymbol{Name: identName(n.Table), Range: rangeByNode(lex, n.Table)}
@@ -1429,7 +1411,7 @@ func isUnquotedIdentifier(s string) bool {
 	return true
 }
 
-func tableNameAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos protocol.Position) (string, bool) {
+func tableNameAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (string, bool) {
 	var result string
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
 		if result != "" {
@@ -1437,17 +1419,17 @@ func tableNameAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos protoco
 		}
 		switch n := node.(type) {
 		case *ast.CreateTable:
-			if include(positionByNode(lex, n.Name), pos) {
+			if include(lex, positionByNode(lex, n.Name), pos) {
 				result = pathName(n.Name)
 				return false
 			}
 		case *ast.PathTableExpr:
-			if include(positionByNode(lex, n.Path), pos) {
+			if include(lex, positionByNode(lex, n.Path), pos) {
 				result = pathName(n.Path)
 				return false
 			}
 		case *ast.TableName:
-			if include(positionByNode(lex, n.Table), pos) {
+			if include(lex, positionByNode(lex, n.Table), pos) {
 				result = identName(n.Table)
 				return false
 			}
@@ -1486,7 +1468,7 @@ type columnDefinitionMatch struct {
 	TableName string
 	Column    *ast.ColumnDef
 	URI       protocol.DocumentURI
-	Lexer     *memefish.Lexer
+	Lexer     *sourceLexer
 }
 
 func (h *Handler) columnDefinitionMatches(name string) []columnDefinitionMatch {
@@ -1571,7 +1553,7 @@ type pathElem struct {
 	Node     ast.Node
 }
 
-func findNodesByPos(logger *slog.Logger, lex *memefish.Lexer, stmts []ast.Statement, lspPos protocol.Position) []pathElem {
+func findNodesByPos(logger *slog.Logger, lex *sourceLexer, stmts []ast.Statement, lspPos protocol.Position) []pathElem {
 	var result []pathElem
 	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
 		if node == nil {
@@ -1581,7 +1563,7 @@ func findNodesByPos(logger *slog.Logger, lex *memefish.Lexer, stmts []ast.Statem
 		nodePos := lex.Position(node.Pos(), node.End())
 
 		// logger.Info("findNodesByPos", slog.Any("path", path), slog.String("nodeType", fmt.Sprintf("%T", node)), slog.Any("nodePos", positionByNode(lex, node)))
-		if include(nodePos, lspPos) {
+		if include(lex, nodePos, lspPos) {
 			// logger.Info("findNodesByPos", slog.Any("path", path), slog.String("nodeType", fmt.Sprintf("%T", node)))
 			result = append(result, pathElem{
 				Accessor: lo.LastOrEmpty(path),
@@ -1594,35 +1576,26 @@ func findNodesByPos(logger *slog.Logger, lex *memefish.Lexer, stmts []ast.Statem
 	return result
 }
 
-func include(nodePos *token.Position, lspPos protocol.Position) bool {
-	lspPosLine := int(lspPos.Line)
-	lspPosChar := int(lspPos.Character)
-
-	switch {
-	case lspPosLine < nodePos.Line, nodePos.EndLine < lspPosLine, // out of line range
-		lspPosLine == nodePos.Line && lspPosChar < nodePos.Column,       // before first char of node
-		lspPosLine == nodePos.EndLine && nodePos.EndColumn < lspPosChar: // after last char of node
-		return false
-	default:
-		return true
-	}
+func include(lex *sourceLexer, nodePos *token.Position, lspPos protocol.Position) bool {
+	return rangeIncludesPosition(toProtocolRange(lex.index, nodePos), lspPos)
 }
 
-func toFoldingRange(position *token.Position, kind protocol.FoldingRangeKind) protocol.FoldingRange {
+func toFoldingRange(lex *sourceLexer, position *token.Position, kind protocol.FoldingRangeKind) protocol.FoldingRange {
+	r := toProtocolRange(lex.index, position)
 	return protocol.FoldingRange{
-		StartLine:      lo.ToPtr(uint32(position.Line)),
-		StartCharacter: lo.ToPtr(uint32(position.Column)),
-		EndLine:        lo.ToPtr(uint32(position.EndLine)),
-		EndCharacter:   lo.ToPtr(uint32(position.EndColumn)),
+		StartLine:      lo.ToPtr(r.Start.Line),
+		StartCharacter: lo.ToPtr(r.Start.Character),
+		EndLine:        lo.ToPtr(r.End.Line),
+		EndCharacter:   lo.ToPtr(r.End.Character),
 		Kind:           string(kind),
 	}
 }
 
-func toFoldingRangeByNode(lex *memefish.Lexer, node ast.Node, kind protocol.FoldingRangeKind) protocol.FoldingRange {
-	return toFoldingRange(positionByNode(lex, node), kind)
+func toFoldingRangeByNode(lex *sourceLexer, node ast.Node, kind protocol.FoldingRangeKind) protocol.FoldingRange {
+	return toFoldingRange(lex, positionByNode(lex, node), kind)
 }
 
-func positionByNode(lex *memefish.Lexer, node ast.Node) *token.Position {
+func positionByNode(lex *sourceLexer, node ast.Node) *token.Position {
 	return lex.Position(node.Pos(), node.End())
 }
 
@@ -1633,10 +1606,10 @@ func (h *Handler) FoldingRange(ctx context.Context, params *protocol.FoldingRang
 
 	b := h.fileToContentMap[Path]
 	lex := newLexer(Path, string(b))
-	for tok, _ := range gsqlutils.LexerSeq(lex) {
+	for tok, _ := range gsqlutils.LexerSeq(lex.Lexer) {
 		for _, comment := range tok.Comments {
 			if strings.HasPrefix(comment.Raw, "/*") {
-				result = append(result, toFoldingRange(lex.Position(comment.Pos, comment.End), protocol.Comment))
+				result = append(result, toFoldingRange(lex, lex.Position(comment.Pos, comment.End), protocol.Comment))
 			}
 		}
 	}
@@ -1652,7 +1625,7 @@ func (h *Handler) FoldingRange(ctx context.Context, params *protocol.FoldingRang
 		case *ast.ParenTableExpr:
 			result = append(result, toFoldingRangeByNode(lex, n.Source, protocol.Region))
 		case *ast.ScalarSubQuery:
-			result = append(result, toFoldingRange(lex.Position(n.Lparen+1, n.Rparen), protocol.Region))
+			result = append(result, toFoldingRange(lex, lex.Position(n.Lparen+1, n.Rparen), protocol.Region))
 		case *ast.SubQuery:
 			result = append(result, toFoldingRangeByNode(lex, n.Query, protocol.Region))
 		default:
@@ -1675,12 +1648,20 @@ func (h *Handler) Exit(ctx context.Context) (err error) {
 	return nil
 }
 
-func newLexer(filepath, s string) *memefish.Lexer {
-	return &memefish.Lexer{
-		File: &token.File{
-			FilePath: filepath,
-			Buffer:   s,
+type sourceLexer struct {
+	*memefish.Lexer
+	index textIndex
+}
+
+func newLexer(filepath, s string) *sourceLexer {
+	return &sourceLexer{
+		Lexer: &memefish.Lexer{
+			File: &token.File{
+				FilePath: filepath,
+				Buffer:   s,
+			},
 		},
+		index: newTextIndex(s),
 	}
 }
 
@@ -1705,21 +1686,23 @@ func kindToSemanticTokenTypes(kind token.TokenKind) protocol.SemanticTokenTypes 
 
 type semanticToken struct {
 	Line, Col, Length int
+	valid             bool
 
 	TokenType      protocol.SemanticTokenTypes
 	TokenModifiers []protocol.SemanticTokenModifiers
 }
 
-func newSemanticTokenByNode(lex *memefish.Lexer, node ast.Node, tokenType protocol.SemanticTokenTypes, tokenModifiers ...protocol.SemanticTokenModifiers) semanticToken {
+func newSemanticTokenByNode(lex *sourceLexer, node ast.Node, tokenType protocol.SemanticTokenTypes, tokenModifiers ...protocol.SemanticTokenModifiers) semanticToken {
 	return newSemanticToken(lex, node.Pos(), node.End(), tokenType, tokenModifiers...)
 }
 
-func newSemanticToken(lex *memefish.Lexer, pos, end token.Pos, tokenType protocol.SemanticTokenTypes, tokenModifiers ...protocol.SemanticTokenModifiers) semanticToken {
-	position := lex.Position(pos, end)
+func newSemanticToken(lex *sourceLexer, pos, end token.Pos, tokenType protocol.SemanticTokenTypes, tokenModifiers ...protocol.SemanticTokenModifiers) semanticToken {
+	line, character, length, valid := lex.index.singleLineUTF16Range(int(pos), int(end))
 	return semanticToken{
-		Line:           position.Line,
-		Col:            position.Column,
-		Length:         int(end - pos),
+		Line:           line,
+		Col:            character,
+		Length:         length,
+		valid:          valid,
 		TokenType:      tokenType,
 		TokenModifiers: tokenModifiers,
 	}
@@ -1789,6 +1772,11 @@ loop:
 
 	var line, column int
 	for _, token := range tokens {
+		// LSP semantic tokens are single-line. Multiline splitting is handled
+		// separately; never emit a byte-length token with invalid coordinates.
+		if !token.valid {
+			continue
+		}
 		tokenNum, ok := h.tokenTypeMap[token.TokenType]
 		if !ok {
 			continue
@@ -1901,7 +1889,7 @@ func (h *Handler) Diagnostic(ctx context.Context, params *protocol.DocumentDiagn
 	return &protocol.DocumentDiagnosticReport{Value: protocol.FullDocumentDiagnosticReport{
 		Kind:     string(protocol.DiagnosticFull),
 		ResultID: resultID,
-		Items:    diagnosticsFromParseError(err),
+		Items:    diagnosticsFromParseError(err, text),
 	}}, nil
 }
 
@@ -1952,7 +1940,7 @@ func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.Work
 			FullDocumentDiagnosticReport: protocol.FullDocumentDiagnosticReport{
 				Kind:     string(protocol.DiagnosticFull),
 				ResultID: resultID,
-				Items:    diagnosticsFromParseError(err),
+				Items:    diagnosticsFromParseError(err, text),
 			},
 		}})
 	}
@@ -2131,7 +2119,7 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 	h.parsedMap[uri.Path()] = parsed
 
 	if err != nil {
-		diags := diagnosticsFromParseError(err)
+		diags := diagnosticsFromParseError(err, text)
 		if len(diags) > 0 {
 			if publishErr := client.PublishDiagnostics(ctx, &protocol.PublishDiagnosticsParams{
 				URI:         uri,
@@ -2147,7 +2135,7 @@ func (h *Handler) parse(ctx context.Context, uri protocol.DocumentURI, text stri
 	return h.clearDiagnostics(ctx, uri)
 }
 
-func diagnosticsFromParseError(err error) []protocol.Diagnostic {
+func diagnosticsFromParseError(err error, text string) []protocol.Diagnostic {
 	result := []protocol.Diagnostic{}
 	parseErrors, ok := lo.ErrorsAs[memefish.MultiError](err)
 	if !ok {
@@ -2155,24 +2143,15 @@ func diagnosticsFromParseError(err error) []protocol.Diagnostic {
 	}
 	for _, elem := range parseErrors {
 		result = append(result, protocol.Diagnostic{
-			Range:   toProtocolRange(elem.Position),
+			Range:   toProtocolRange(newTextIndex(text), elem.Position),
 			Message: elem.Message,
 		})
 	}
 	return result
 }
 
-func toProtocolRange(position *token.Position) protocol.Range {
-	return protocol.Range{
-		Start: protocol.Position{
-			Line:      uint32(position.Line),
-			Character: uint32(position.Column),
-		},
-		End: protocol.Position{
-			Line:      uint32(position.EndLine),
-			Character: uint32(position.EndColumn),
-		},
-	}
+func toProtocolRange(index textIndex, position *token.Position) protocol.Range {
+	return index.rangeByByteOffsets(int(position.Pos), int(position.End))
 }
 
 func NewHandler(logger *slog.Logger, importPaths []string) *Handler {

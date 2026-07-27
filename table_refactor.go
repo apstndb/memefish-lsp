@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/apstndb/go-lsp-export/protocol"
-	"github.com/cloudspannerecosystem/memefish"
 	"github.com/cloudspannerecosystem/memefish/ast"
 	"github.com/cloudspannerecosystem/memefish/token"
 
@@ -23,16 +22,16 @@ type tableRefactorPlan struct {
 	Sites map[string][]tableRefactorSite
 }
 
-func tableRefactorTargetAtPosition(lex *memefish.Lexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
+func tableRefactorTargetAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
 	var result tableSymbol
 	setPath := func(path *ast.Path) {
-		if result.Name != "" || !isUnquotedSimplePath(lex, path) || !include(positionByNode(lex, path), pos) {
+		if result.Name != "" || !isUnquotedSimplePath(lex, path) || !include(lex, positionByNode(lex, path), pos) {
 			return
 		}
 		result = tableSymbol{Name: pathName(path), Range: rangeByNode(lex, path)}
 	}
 	setIdent := func(ident *ast.Ident) {
-		if result.Name != "" || !isUnquotedIdent(lex, ident) || !include(positionByNode(lex, ident), pos) {
+		if result.Name != "" || !isUnquotedIdent(lex, ident) || !include(lex, positionByNode(lex, ident), pos) {
 			return
 		}
 		result = tableSymbol{Name: identName(ident), Range: rangeByNode(lex, ident)}
@@ -119,7 +118,7 @@ func (h *Handler) tableRefactorPlan(name string) (*tableRefactorPlan, bool) {
 	return plan, true
 }
 
-func collectTableRefactorSites(lex *memefish.Lexer, stmts []ast.Statement, target string) ([]tableRefactorSite, int, bool) {
+func collectTableRefactorSites(lex *sourceLexer, stmts []ast.Statement, target string) ([]tableRefactorSite, int, bool) {
 	var sites []tableRefactorSite
 	declarations := 0
 	safe := true
@@ -306,11 +305,11 @@ func (h *Handler) workspaceRootForPathLocked(path string) string {
 	return best
 }
 
-func isUnquotedSimplePath(lex *memefish.Lexer, path *ast.Path) bool {
+func isUnquotedSimplePath(lex *sourceLexer, path *ast.Path) bool {
 	return isSimplePath(path) && isUnquotedIdent(lex, path.Idents[0])
 }
 
-func isUnquotedIdent(lex *memefish.Lexer, ident *ast.Ident) bool {
+func isUnquotedIdent(lex *sourceLexer, ident *ast.Ident) bool {
 	if ident == nil || !isUnquotedIdentifier(ident.Name) {
 		return false
 	}
