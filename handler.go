@@ -1564,22 +1564,49 @@ func (h *Handler) CodeLens(_ context.Context, params *protocol.CodeLensParams) (
 		if len(references) == 0 {
 			return false
 		}
-		argument, err := json.Marshal(references[0])
-		if err != nil {
-			return false
-		}
 		nameRange := rangeByNode(lex, name)
-		result = append(result, protocol.CodeLens{
-			Range: protocol.Range{Start: nameRange.Start, End: nameRange.Start},
-			Command: &protocol.Command{
-				Title:     fmt.Sprintf("%d %s", len(references), lo.Ternary(len(references) == 1, "reference", "references")),
-				Command:   openReferenceCommand,
-				Arguments: []json.RawMessage{argument},
-			},
-		})
+		if lens, ok := referenceCodeLens(nameRange, references); ok {
+			result = append(result, lens)
+		}
 		return false
 	})
+	for _, binding := range h.cteIndexLocked(path, string(h.fileToContentMap[path])).bindings {
+		references := make([]protocol.Location, 0, len(binding.referenceRanges))
+		for _, referenceRange := range binding.referenceRanges {
+			references = append(references, protocol.Location{
+				URI:   uri,
+				Range: referenceRange,
+			})
+		}
+		if lens, ok := referenceCodeLens(binding.declarationRange, references); ok {
+			result = append(result, lens)
+		}
+	}
+	slices.SortFunc(result, func(a, b protocol.CodeLens) int {
+		return comparePosition(a.Range.Start, b.Range.Start)
+	})
 	return result, nil
+}
+
+func referenceCodeLens(
+	declarationRange protocol.Range,
+	references []protocol.Location,
+) (protocol.CodeLens, bool) {
+	if len(references) == 0 {
+		return protocol.CodeLens{}, false
+	}
+	argument, err := json.Marshal(references[0])
+	if err != nil {
+		return protocol.CodeLens{}, false
+	}
+	return protocol.CodeLens{
+		Range: protocol.Range{Start: declarationRange.Start, End: declarationRange.Start},
+		Command: &protocol.Command{
+			Title:     fmt.Sprintf("%d %s", len(references), lo.Ternary(len(references) == 1, "reference", "references")),
+			Command:   openReferenceCommand,
+			Arguments: []json.RawMessage{argument},
+		},
+	}, true
 }
 
 func (h *Handler) ExecuteCommand(ctx context.Context, params *protocol.ExecuteCommandParams) (interface{}, error) {
