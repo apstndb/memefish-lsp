@@ -141,47 +141,58 @@ func rangeByNode(lex *sourceLexer, node ast.Node) protocol.Range {
 }
 
 func (h *Handler) DocumentSymbol(ctx context.Context, params *protocol.DocumentSymbolParams) ([]interface{}, error) {
-	// Note: this function is NOP because it requires extra configurations for LSP4IJ
-	// https://github.com/redhat-developer/lsp4ij/blob/main/docs/LSPSupport.md#document-symbol
+	h.fileContentMu.Lock()
+	path := params.TextDocument.URI.Path()
+	snapshot := h.documents[path]
+	text := string(h.fileToContentMap[path])
+	statements := h.parsedMap[path]
+	h.fileContentMu.Unlock()
+
+	if snapshot != nil {
+		return documentSymbolsFromFacts(snapshot.facts), nil
+	}
+	return documentSymbolsFromFacts(extractDDLFacts(newTextIndex(text), statements)), nil
+}
+
+type documentFactSource struct {
+	path       string
+	facts      documentFacts
+	hasFacts   bool
+	text       string
+	statements []ast.Statement
+}
+
+func (h *Handler) workspaceFactSources() []documentFactSource {
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
-	var result []any
-	parsed := h.parsedMap[params.TextDocument.URI.Path()]
-	lex := newLexer(params.TextDocument.URI.Path(), string(h.fileToContentMap[params.TextDocument.URI.Path()]))
-
-	memewalk.InspectSlice(parsed, func(path []string, node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.CreateTable:
-			var children []protocol.DocumentSymbol
-			for _, column := range n.Columns {
-				children = append(children, protocol.DocumentSymbol{
-					Name:  column.Name.Name,
-					Kind:  protocol.Field,
-					Range: rangeByNode(lex, column),
-				})
-			}
-			result = append(result, protocol.DocumentSymbol{
-				Name:     fullname(n.Name.Idents),
-				Kind:     protocol.Struct,
-				Range:    rangeByNode(lex, node),
-				Children: children,
-			})
+	sources := make([]documentFactSource, 0, len(h.fileToContentMap))
+	for path, content := range h.fileToContentMap {
+		source := documentFactSource{path: path}
+		if snapshot := h.documents[path]; snapshot != nil {
+			source.facts = snapshot.facts
+			source.hasFacts = true
+		} else {
+			source.text = string(content)
+			source.statements = h.parsedMap[path]
 		}
-		return true
-	})
-	return result, nil
+		sources = append(sources, source)
+	}
+	return sources
 }
 
 func (h *Handler) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolParams) ([]protocol.SymbolInformation, error) {
-	h.fileContentMu.Lock()
-	defer h.fileContentMu.Unlock()
-
 	result := []protocol.SymbolInformation{}
-	for path, stmts := range h.parsedMap {
-		lex := newLexer(path, string(h.fileToContentMap[path]))
-		uri := protocol.DocumentURI("file://" + path)
-		result = append(result, workspaceSymbols(uri, lex, stmts, params.Query)...)
+	for _, source := range h.workspaceFactSources() {
+		facts := source.facts
+		if !source.hasFacts {
+			facts = extractDDLFacts(newTextIndex(source.text), source.statements)
+		}
+		result = append(result, workspaceSymbolsFromFacts(
+			protocol.URIFromPath(source.path),
+			facts,
+			params.Query,
+		)...)
 	}
 	slices.SortFunc(result, func(a, b protocol.SymbolInformation) int {
 		return cmp.Or(
@@ -192,58 +203,6 @@ func (h *Handler) Symbol(ctx context.Context, params *protocol.WorkspaceSymbolPa
 		)
 	})
 	return result, nil
-}
-
-func workspaceSymbols(
-	uri protocol.DocumentURI,
-	lex *sourceLexer,
-	stmts []ast.Statement,
-	query string,
-) []protocol.SymbolInformation {
-	result := []protocol.SymbolInformation{}
-	add := func(name string, kind protocol.SymbolKind, node ast.Node, container string) {
-		if name == "" || !fuzzySymbolMatch(name, query) {
-			return
-		}
-		result = append(result, protocol.SymbolInformation{
-			Name:          name,
-			Kind:          kind,
-			ContainerName: container,
-			Location: protocol.Location{
-				URI:   uri,
-				Range: rangeByNode(lex, node),
-			},
-		})
-	}
-
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.CreateSchema:
-			add(identName(n.Name), protocol.Namespace, n.Name, "")
-		case *ast.CreateTable:
-			tableName := pathName(n.Name)
-			add(tableName, protocol.Struct, n.Name, "")
-			for _, column := range n.Columns {
-				add(identName(column.Name), protocol.Field, column.Name, tableName)
-			}
-		case *ast.CreateSequence:
-			add(pathName(n.Name), protocol.Object, n.Name, "")
-		case *ast.CreateView:
-			add(pathName(n.Name), protocol.Object, n.Name, "")
-		case *ast.CreateIndex:
-			add(pathName(n.Name), protocol.Key, n.Name, pathName(n.TableName))
-		case *ast.CreateVectorIndex:
-			add(identName(n.Name), protocol.Key, n.Name, identName(n.TableName))
-		case *ast.CreateChangeStream:
-			add(identName(n.Name), protocol.Event, n.Name, "")
-		case *ast.CreateModel:
-			add(identName(n.Name), protocol.Class, n.Name, "")
-		case *ast.CreateSearchIndex:
-			add(pathName(n.Name), protocol.Key, n.Name, pathName(n.TableName))
-		}
-		return true
-	})
-	return result
 }
 
 func fuzzySymbolMatch(name, query string) bool {
