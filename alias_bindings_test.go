@@ -217,3 +217,137 @@ SELECT l.PhysicalOnly FROM LocalRows AS l`
 		t.Fatalf("Definition() = %#v, want no physical-column result for CTE source", got)
 	}
 }
+
+func TestExplicitTableAliasRenameAndLinkedEditing(t *testing.T) {
+	const text = "SELECT s.SingerId FROM Singers AS s WHERE s.Active"
+	h := newParsedTestHandler(t, "/test.sql", text)
+	aliasPosition := newTextIndex(text).position(strings.Index(text, "s.SingerId"))
+
+	prepared, err := h.PrepareRename(context.Background(), &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     aliasPosition,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared == nil || prepared.Placeholder != "s" ||
+		prepared.Range.Start != aliasPosition {
+		t.Fatalf("PrepareRename() = %#v, want alias s", prepared)
+	}
+
+	renamed, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     aliasPosition,
+		},
+		NewName: "singer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edits := renamed.Changes["file:///test.sql"]
+	if len(edits) != 3 {
+		t.Fatalf("Rename() edits = %#v, want declaration and two references", edits)
+	}
+	for _, edit := range edits {
+		if edit.NewText != "singer" {
+			t.Fatalf("Rename() edit = %#v, want singer", edit)
+		}
+	}
+
+	linked, err := h.LinkedEditingRange(context.Background(), &protocol.LinkedEditingRangeParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     aliasPosition,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked == nil || len(linked.Ranges) != 3 {
+		t.Fatalf("LinkedEditingRange() = %#v, want declaration and two references", linked)
+	}
+}
+
+func TestExplicitTableAliasRenameRespectsNestedBinding(t *testing.T) {
+	const text = "SELECT s.SingerId, (SELECT a.AlbumId FROM Albums AS a) FROM Singers AS s"
+	h := newParsedTestHandler(t, "/test.sql", text)
+	innerAliasOffset := strings.Index(text, "a.AlbumId")
+
+	got, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(innerAliasOffset),
+		},
+		NewName: "album",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edits := got.Changes["file:///test.sql"]
+	if len(edits) != 2 {
+		t.Fatalf("Rename() edits = %#v, want only inner declaration and reference", edits)
+	}
+	for _, edit := range edits {
+		if edit.Range.Start == newTextIndex(text).position(strings.Index(text, "s.SingerId")) {
+			t.Fatalf("Rename() included outer alias reference: %#v", edits)
+		}
+	}
+}
+
+func TestExplicitTableAliasRenameRejectsConflictingName(t *testing.T) {
+	const text = "SELECT s.SingerId, a.AlbumId FROM Singers AS s JOIN Albums AS a ON TRUE"
+	h := newParsedTestHandler(t, "/test.sql", text)
+
+	got, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(strings.Index(text, "s.SingerId")),
+		},
+		NewName: "a",
+	})
+	if err == nil || got != nil {
+		t.Fatalf("Rename() = %#v, %v, want conflicting-name error", got, err)
+	}
+}
+
+func TestExplicitTableAliasRenameAllowsNameFromSeparateStatement(t *testing.T) {
+	const text = "SELECT s.SingerId FROM Singers AS s; SELECT a.AlbumId FROM Albums AS a"
+	h := newParsedTestHandler(t, "/test.sql", text)
+
+	got, err := h.Rename(context.Background(), &protocol.RenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(strings.Index(text, "s.SingerId")),
+		},
+		NewName: "a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	edits := got.Changes["file:///test.sql"]
+	if len(edits) != 2 {
+		t.Fatalf("Rename() edits = %#v, want first-statement alias only", edits)
+	}
+}
+
+func TestDuplicateExplicitTableAliasesCannotBeRenamed(t *testing.T) {
+	const text = "SELECT a.SingerId FROM Singers AS a JOIN Albums AS a ON TRUE"
+	h := newParsedTestHandler(t, "/test.sql", text)
+	declarationOffset := strings.Index(text, "AS a") + len("AS ")
+
+	got, err := h.PrepareRename(context.Background(), &protocol.PrepareRenameParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			Position:     newTextIndex(text).position(declarationOffset),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("PrepareRename() = %#v, want nil for duplicate aliases", got)
+	}
+}

@@ -15,6 +15,7 @@ type aliasBinding struct {
 	declarationRange protocol.Range
 	referenceRanges  []protocol.Range
 	sourceTableName  string
+	ambiguous        bool
 }
 
 type aliasSite struct {
@@ -193,6 +194,10 @@ func addTableAlias(
 
 	key := strings.ToUpper(name)
 	if _, duplicate := localNames[key]; duplicate {
+		binding.ambiguous = true
+		if previous := scope[key]; previous != nil {
+			previous.ambiguous = true
+		}
 		scope[key] = nil
 		return
 	}
@@ -269,7 +274,9 @@ func (index aliasIndex) memberAtPosition(pos protocol.Position) (aliasMemberSite
 }
 
 func (index aliasIndex) bindingAtPosition(name string, pos protocol.Position) (*aliasBinding, bool) {
-	if site, ok := index.siteAtPosition(pos); ok && strings.EqualFold(site.binding.name, name) {
+	if site, ok := index.siteAtPosition(pos); ok &&
+		!site.binding.ambiguous &&
+		strings.EqualFold(site.binding.name, name) {
 		return site.binding, true
 	}
 
@@ -289,7 +296,27 @@ func (index aliasIndex) bindingAtPosition(name string, pos protocol.Position) (*
 		return nil, false
 	}
 	binding := best.bindings[key]
-	return binding, binding != nil
+	return binding, binding != nil && !binding.ambiguous
+}
+
+func (index aliasIndex) renameConflicts(binding *aliasBinding, newName string) bool {
+	newKey := strings.ToUpper(newName)
+	for _, scope := range index.scopes {
+		targetVisible := false
+		for _, candidate := range scope.bindings {
+			if candidate == binding {
+				targetVisible = true
+				break
+			}
+		}
+		if !targetVisible {
+			continue
+		}
+		if candidate := scope.bindings[newKey]; candidate != nil && candidate != binding {
+			return true
+		}
+	}
+	return false
 }
 
 func (binding *aliasBinding) locations(uri protocol.DocumentURI, includeDeclaration bool) []protocol.Location {
@@ -313,6 +340,21 @@ func (binding *aliasBinding) highlights() []protocol.DocumentHighlight {
 		result = append(result, protocol.DocumentHighlight{
 			Range: referenceRange,
 			Kind:  protocol.Read,
+		})
+	}
+	return result
+}
+
+func (binding *aliasBinding) edits(newName string) []protocol.TextEdit {
+	result := make([]protocol.TextEdit, 0, len(binding.referenceRanges)+1)
+	result = append(result, protocol.TextEdit{
+		Range:   binding.declarationRange,
+		NewText: newName,
+	})
+	for _, referenceRange := range binding.referenceRanges {
+		result = append(result, protocol.TextEdit{
+			Range:   referenceRange,
+			NewText: newName,
 		})
 	}
 	return result

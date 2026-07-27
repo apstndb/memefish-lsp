@@ -1102,6 +1102,9 @@ func (h *Handler) DocumentHighlight(ctx context.Context, params *protocol.Docume
 		return site.binding.highlights(), nil
 	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
 		return site.binding.highlights(), nil
 	}
 	target, ok := identifierAtPosition(path, text, params.Position)
@@ -1164,6 +1167,9 @@ func (h *Handler) Definition(ctx context.Context, params *protocol.DefinitionPar
 	}
 	aliases := h.aliasIndexLocked(path, text)
 	if site, ok := aliases.siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
 		return []protocol.Location{{
 			URI:   params.TextDocument.URI,
 			Range: site.binding.declarationRange,
@@ -1266,6 +1272,9 @@ func (h *Handler) References(ctx context.Context, params *protocol.ReferencePara
 		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
 	}
 	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
 		return site.binding.locations(params.TextDocument.URI, params.Context.IncludeDeclaration), nil
 	}
 	lex := newLexer(path, text)
@@ -1420,6 +1429,16 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 
 	path := params.TextDocument.URI.Path()
 	text := string(h.fileToContentMap[path])
+	aliases := h.aliasIndexLocked(path, text)
+	if site, ok := aliases.siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		return &protocol.PrepareRenameResult{
+			Range:       site.range_,
+			Placeholder: site.binding.name,
+		}, nil
+	}
 	lex := newLexer(path, text)
 	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
@@ -1437,7 +1456,7 @@ func (h *Handler) PrepareRename(ctx context.Context, params *protocol.PrepareRen
 
 func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*protocol.WorkspaceEdit, error) {
 	if !isUnquotedIdentifier(params.NewName) {
-		return nil, fmt.Errorf("invalid table rename target %q", params.NewName)
+		return nil, fmt.Errorf("invalid rename target %q", params.NewName)
 	}
 
 	h.fileContentMu.Lock()
@@ -1446,6 +1465,20 @@ func (h *Handler) Rename(ctx context.Context, params *protocol.RenameParams) (*p
 	uri := params.TextDocument.URI
 	path := uri.Path()
 	text := string(h.fileToContentMap[path])
+	aliases := h.aliasIndexLocked(path, text)
+	if site, ok := aliases.siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		if aliases.renameConflicts(site.binding, params.NewName) {
+			return nil, fmt.Errorf("table alias %q already exists", params.NewName)
+		}
+		return &protocol.WorkspaceEdit{
+			Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+				uri: site.binding.edits(params.NewName),
+			},
+		}, nil
+	}
 	lex := newLexer(path, text)
 	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
@@ -1481,7 +1514,23 @@ func (h *Handler) LinkedEditingRange(ctx context.Context, params *protocol.Linke
 	defer h.fileContentMu.Unlock()
 
 	path := params.TextDocument.URI.Path()
-	lex := newLexer(path, string(h.fileToContentMap[path]))
+	text := string(h.fileToContentMap[path])
+	if site, ok := h.aliasIndexLocked(path, text).siteAtPosition(params.Position); ok {
+		if site.binding.ambiguous {
+			return nil, nil
+		}
+		ranges := make([]protocol.Range, 0, len(site.binding.referenceRanges)+1)
+		ranges = append(ranges, site.binding.declarationRange)
+		ranges = append(ranges, site.binding.referenceRanges...)
+		if len(ranges) < 2 {
+			return nil, nil
+		}
+		return &protocol.LinkedEditingRanges{
+			Ranges:      ranges,
+			WordPattern: "[A-Za-z_][A-Za-z0-9_]*",
+		}, nil
+	}
+	lex := newLexer(path, text)
 	symbol, ok := tableRefactorTargetAtPosition(lex, h.parsedMap[path], params.Position)
 	if !ok {
 		return nil, nil
