@@ -868,14 +868,118 @@ func (h *Handler) Completion(ctx context.Context, params *protocol.CompletionPar
 	defer h.fileContentMu.Unlock()
 
 	path := params.TextDocument.URI.Path()
-	prefix := completionPrefixAt(string(h.fileToContentMap[path]), params.Position)
-	items := completionItems(string(h.fileToContentMap[path]), prefix)
+	text := string(h.fileToContentMap[path])
+	if qualifier, prefix, qualifierPosition, ok := completionMemberPrefixAt(text, params.Position); ok {
+		return &protocol.CompletionList{
+			IsIncomplete: false,
+			Items: h.aliasMemberCompletionItemsLocked(
+				path,
+				text,
+				qualifier,
+				prefix,
+				qualifierPosition,
+				params.Position,
+			),
+		}, nil
+	}
+
+	prefix := completionPrefixAt(text, params.Position)
+	items := completionItems(text, prefix)
 	items = appendWorkspaceCompletionItems(items, h.parsedMap, prefix)
 
 	return &protocol.CompletionList{
 		IsIncomplete: false,
 		Items:        items,
 	}, nil
+}
+
+func completionMemberPrefixAt(
+	text string,
+	pos protocol.Position,
+) (qualifier, prefix string, qualifierPosition protocol.Position, ok bool) {
+	index := newTextIndex(text)
+	offset, ok := index.byteOffset(pos)
+	if !ok {
+		return "", "", protocol.Position{}, false
+	}
+	prefixStart := offset
+	for prefixStart > 0 && isIdentChar(text[prefixStart-1]) {
+		prefixStart--
+	}
+	if prefixStart == 0 || text[prefixStart-1] != '.' {
+		return "", "", protocol.Position{}, false
+	}
+	qualifierEnd := prefixStart - 1
+	qualifierStart := qualifierEnd
+	for qualifierStart > 0 && isIdentChar(text[qualifierStart-1]) {
+		qualifierStart--
+	}
+	if qualifierStart == qualifierEnd {
+		return "", "", protocol.Position{}, false
+	}
+	return text[qualifierStart:qualifierEnd],
+		text[prefixStart:offset],
+		index.position(qualifierStart),
+		true
+}
+
+func (h *Handler) aliasMemberCompletionItemsLocked(
+	path, text, qualifier, prefix string,
+	qualifierPosition protocol.Position,
+	cursorPosition protocol.Position,
+) []protocol.CompletionItem {
+	binding, ok := h.aliasIndexLocked(path, text).bindingAtPosition(qualifier, qualifierPosition)
+	if !ok {
+		binding, ok = repairedAliasBinding(path, text, qualifier, qualifierPosition, cursorPosition)
+	}
+	if !ok || binding.sourceTableName == "" {
+		return []protocol.CompletionItem{}
+	}
+	tables := h.tableFactMatchesLocked(binding.sourceTableName)
+	if len(tables) != 1 {
+		return []protocol.CompletionItem{}
+	}
+
+	var items []protocol.CompletionItem
+	for _, column := range tables[0].table.columns {
+		name := column.name.string()
+		if !strings.HasPrefix(strings.ToUpper(name), strings.ToUpper(prefix)) {
+			continue
+		}
+		detail := "column of " + binding.sourceTableName
+		if column.schemaType != nil {
+			detail = column.schemaType.SQL()
+		}
+		items = append(items, protocol.CompletionItem{
+			Label:  name,
+			Kind:   protocol.FieldCompletion,
+			Detail: detail,
+		})
+	}
+	slices.SortFunc(items, func(a, b protocol.CompletionItem) int {
+		return strings.Compare(strings.ToUpper(a.Label), strings.ToUpper(b.Label))
+	})
+	return items
+}
+
+func repairedAliasBinding(
+	path, text, qualifier string,
+	qualifierPosition, cursorPosition protocol.Position,
+) (*aliasBinding, bool) {
+	index := newTextIndex(text)
+	offset, ok := index.byteOffset(cursorPosition)
+	if !ok {
+		return nil, false
+	}
+	const placeholder = "__memefish_completion"
+	repairedText := text[:offset] + placeholder + text[offset:]
+	statements, err := memefish.ParseStatements(path, repairedText)
+	if err != nil {
+		return nil, false
+	}
+	repairedIndex := newTextIndex(repairedText)
+	ctes := extractCTEIndex(repairedIndex, statements)
+	return extractAliasIndex(repairedIndex, statements, ctes).bindingAtPosition(qualifier, qualifierPosition)
 }
 
 func appendWorkspaceCompletionItems(items []protocol.CompletionItem, parsed map[string][]ast.Statement, prefix string) []protocol.CompletionItem {

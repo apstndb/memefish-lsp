@@ -29,10 +29,16 @@ type aliasMemberSite struct {
 	range_  protocol.Range
 }
 
+type aliasScope struct {
+	range_   protocol.Range
+	bindings map[string]*aliasBinding
+}
+
 type aliasIndex struct {
 	bindings    []*aliasBinding
 	sites       []aliasSite
 	memberSites []aliasMemberSite
+	scopes      []aliasScope
 }
 
 func extractAliasIndex(index textIndex, statements []ast.Statement, ctes cteIndex) aliasIndex {
@@ -84,6 +90,10 @@ func indexSelectAliases(
 	if selectExpr.From != nil {
 		collectTableAliases(index, selectExpr.From.Source, scope, localNames, sourcePaths, ctes, result)
 	}
+	result.scopes = append(result.scopes, aliasScope{
+		range_:   nodeRange(index, selectExpr),
+		bindings: cloneAliasScope(scope),
+	})
 
 	memewalk.Inspect(selectExpr, func(path []string, node ast.Node) bool {
 		if node == nil {
@@ -258,6 +268,30 @@ func (index aliasIndex) memberAtPosition(pos protocol.Position) (aliasMemberSite
 	return aliasMemberSite{}, false
 }
 
+func (index aliasIndex) bindingAtPosition(name string, pos protocol.Position) (*aliasBinding, bool) {
+	if site, ok := index.siteAtPosition(pos); ok && strings.EqualFold(site.binding.name, name) {
+		return site.binding, true
+	}
+
+	key := strings.ToUpper(name)
+	var best aliasScope
+	found := false
+	for _, scope := range index.scopes {
+		if !rangeIncludesPosition(scope.range_, pos) {
+			continue
+		}
+		if !found || comparePosition(best.range_.Start, scope.range_.Start) < 0 {
+			best = scope
+			found = true
+		}
+	}
+	if !found {
+		return nil, false
+	}
+	binding := best.bindings[key]
+	return binding, binding != nil
+}
+
 func (binding *aliasBinding) locations(uri protocol.DocumentURI, includeDeclaration bool) []protocol.Location {
 	result := make([]protocol.Location, 0, len(binding.referenceRanges)+1)
 	if includeDeclaration {
@@ -297,8 +331,13 @@ type tableColumnFactMatch struct {
 	column tableColumnFact
 }
 
-func (h *Handler) tableColumnFactMatchesLocked(tableName, columnName string) []tableColumnFactMatch {
-	var result []tableColumnFactMatch
+type tableFactMatch struct {
+	uri   protocol.DocumentURI
+	table tableFact
+}
+
+func (h *Handler) tableFactMatchesLocked(tableName string) []tableFactMatch {
+	var result []tableFactMatch
 	for path, content := range h.fileToContentMap {
 		var facts documentFacts
 		if snapshot := h.documents[path]; snapshot != nil {
@@ -307,16 +346,26 @@ func (h *Handler) tableColumnFactMatchesLocked(tableName, columnName string) []t
 			facts = extractDDLFacts(newTextIndex(string(content)), h.parsedMap[path])
 		}
 		for _, table := range facts.tables {
-			if !strings.EqualFold(table.name.string(), tableName) {
-				continue
+			if strings.EqualFold(table.name.string(), tableName) {
+				result = append(result, tableFactMatch{
+					uri:   protocol.URIFromPath(path),
+					table: table,
+				})
 			}
-			for _, column := range table.columns {
-				if strings.EqualFold(column.name.string(), columnName) {
-					result = append(result, tableColumnFactMatch{
-						uri:    protocol.URIFromPath(path),
-						column: column,
-					})
-				}
+		}
+	}
+	return result
+}
+
+func (h *Handler) tableColumnFactMatchesLocked(tableName, columnName string) []tableColumnFactMatch {
+	var result []tableColumnFactMatch
+	for _, match := range h.tableFactMatchesLocked(tableName) {
+		for _, column := range match.table.columns {
+			if strings.EqualFold(column.name.string(), columnName) {
+				result = append(result, tableColumnFactMatch{
+					uri:    match.uri,
+					column: column,
+				})
 			}
 		}
 	}

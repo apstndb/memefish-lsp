@@ -75,6 +75,117 @@ func TestCompletionIncludesWorkspaceSchemaIdentifiers(t *testing.T) {
 	t.Fatalf("Completion() items = %#v, want workspace Singers table", got.Items)
 }
 
+func TestCompletionIncludesColumnsForExplicitTableAlias(t *testing.T) {
+	const query = "SELECT s.Si FROM Singers AS s"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64, Name STRING(MAX)) PRIMARY KEY (SingerId)")
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "Si FROM") + len("Si")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 1 || got.Items[0].Label != "SingerId" || got.Items[0].Kind != protocol.FieldCompletion {
+		t.Fatalf("Completion() items = %#v, want only SingerId", got.Items)
+	}
+	if got.Items[0].Detail != "INT64" {
+		t.Fatalf("Completion() detail = %q, want INT64", got.Items[0].Detail)
+	}
+}
+
+func TestCompletionImmediatelyAfterExplicitAliasDot(t *testing.T) {
+	const query = "SELECT s. FROM Singers AS s"
+	statements, _ := memefish.ParseStatements("/query.sql", query)
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap["/query.sql"] = []byte(query)
+	h.parsedMap["/query.sql"] = statements
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64, Name STRING(MAX)) PRIMARY KEY (SingerId)")
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(len("SELECT s.")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotLabels := make([]string, 0, len(got.Items))
+	for _, item := range got.Items {
+		gotLabels = append(gotLabels, item.Label)
+	}
+	if !slices.Equal(gotLabels, []string{"Name", "SingerId"}) {
+		t.Fatalf("Completion() labels = %#v, want table columns after dot", gotLabels)
+	}
+}
+
+func TestCompletionUsesInnermostExplicitTableAlias(t *testing.T) {
+	const query = "SELECT (SELECT a.Al FROM Albums AS a), a.Si FROM Singers AS a"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", `
+CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId);
+CREATE TABLE Albums (AlbumId INT64) PRIMARY KEY (AlbumId)`)
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "Al FROM") + len("Al")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 1 || got.Items[0].Label != "AlbumId" {
+		t.Fatalf("Completion() items = %#v, want inner Albums.AlbumId", got.Items)
+	}
+}
+
+func TestCompletionRejectsUnknownAliasShape(t *testing.T) {
+	const query = "WITH LocalRows AS (SELECT 1 AS Id) SELECT r.I FROM LocalRows AS r"
+	h := newParsedTestHandler(t, "/query.sql", query)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE LocalRows (IgnoredId INT64) PRIMARY KEY (IgnoredId)")
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(strings.Index(query, "I FROM") + len("I")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 0 {
+		t.Fatalf("Completion() items = %#v, want none for CTE-backed alias", got.Items)
+	}
+}
+
+func TestCompletionRejectsAmbiguousTableShape(t *testing.T) {
+	const query = "SELECT s. FROM Singers AS s"
+	statements, _ := memefish.ParseStatements("/query.sql", query)
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap["/query.sql"] = []byte(query)
+	h.parsedMap["/query.sql"] = statements
+	addParsedTestDocument(t, h, "/schema_a.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	addParsedTestDocument(t, h, "/schema_b.sql", "CREATE TABLE Singers (Name STRING(MAX)) PRIMARY KEY (Name)")
+
+	got, err := h.Completion(context.Background(), &protocol.CompletionParams{
+		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+			TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+			Position:     newTextIndex(query).position(len("SELECT s.")),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 0 {
+		t.Fatalf("Completion() items = %#v, want none for ambiguous table definitions", got.Items)
+	}
+}
+
 func TestSignatureHelpTracksActiveParameter(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT IF(TRUE, 1, "
