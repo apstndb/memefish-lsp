@@ -19,6 +19,7 @@ const (
 	unknownColumnDiagnosticCode        = "unknown-column"
 	invalidSelectOrdinalDiagnosticCode = "invalid-select-ordinal"
 	duplicateCTEDiagnosticCode         = "duplicate-cte"
+	duplicateTableAliasDiagnosticCode  = "duplicate-table-alias"
 )
 
 type diagnosticSchemaColumn struct {
@@ -47,6 +48,7 @@ func (h *Handler) documentDiagnosticStateLocked(snapshot *documentSnapshot) ([]p
 func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protocol.Diagnostic {
 	result := selectOrdinalDiagnostics(snapshot)
 	result = append(result, duplicateCTEDiagnostics(snapshot)...)
+	result = append(result, duplicateTableAliasDiagnostics(snapshot)...)
 	for _, member := range snapshot.aliases.memberSites {
 		if snapshot.selectAliases.ambiguousAtPosition(member.range_.Start) {
 			continue
@@ -126,6 +128,36 @@ func (h *Handler) semanticDiagnosticsLocked(snapshot *documentSnapshot) []protoc
 			strings.Compare(fmt.Sprint(a.Code), fmt.Sprint(b.Code)),
 		)
 	})
+	return result
+}
+
+func duplicateTableAliasDiagnostics(snapshot *documentSnapshot) []protocol.Diagnostic {
+	var result []protocol.Diagnostic
+	for _, binding := range snapshot.aliases.bindings {
+		if binding.duplicateOf == nil {
+			continue
+		}
+		result = append(result, protocol.Diagnostic{
+			Range:    binding.declarationRange,
+			Severity: protocol.SeverityError,
+			Code:     duplicateTableAliasDiagnosticCode,
+			Source:   "memefish-lsp",
+			Message: fmt.Sprintf(
+				"Table alias %q is declared more than once in the same SELECT scope.",
+				binding.name,
+			),
+			RelatedInformation: []protocol.DiagnosticRelatedInformation{{
+				Location: protocol.Location{
+					URI:   protocol.URIFromPath(snapshot.path),
+					Range: binding.duplicateOf.declarationRange,
+				},
+				Message: fmt.Sprintf(
+					"Table alias %q was first declared here.",
+					binding.duplicateOf.name,
+				),
+			}},
+		})
+	}
 	return result
 }
 

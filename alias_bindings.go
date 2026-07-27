@@ -19,6 +19,7 @@ type aliasBinding struct {
 	sourceColumns    []queryColumnFact
 	sourceShapeKnown bool
 	ambiguous        bool
+	duplicateOf      *aliasBinding
 }
 
 type aliasSite struct {
@@ -89,10 +90,10 @@ func indexSelectAliases(
 	result *aliasIndex,
 ) {
 	scope := cloneAliasScope(outerScope)
-	localNames := make(map[string]struct{})
+	localBindings := make(map[string]*aliasBinding)
 	sourcePaths := make(map[protocol.Range]struct{})
 	if selectExpr.From != nil {
-		collectTableAliases(index, selectExpr.From.Source, scope, localNames, sourcePaths, ctes, result)
+		collectTableAliases(index, selectExpr.From.Source, scope, localBindings, sourcePaths, ctes, result)
 	}
 	result.scopes = append(result.scopes, aliasScope{
 		range_:   nodeRange(index, selectExpr),
@@ -131,7 +132,7 @@ func collectTableAliases(
 	index textIndex,
 	table ast.TableExpr,
 	scope map[string]*aliasBinding,
-	localNames map[string]struct{},
+	localBindings map[string]*aliasBinding,
 	sourcePaths map[protocol.Range]struct{},
 	ctes cteIndex,
 	result *aliasIndex,
@@ -146,7 +147,7 @@ func collectTableAliases(
 		if cteBound {
 			sourceName = ""
 		}
-		addTableAlias(index, table.As, sourceName, sourceCTE, nil, false, scope, localNames, result)
+		addTableAlias(index, table.As, sourceName, sourceCTE, nil, false, scope, localBindings, result)
 	case *ast.PathTableExpr:
 		sourcePaths[nodeRange(index, table.Path)] = struct{}{}
 		sourceName := pathName(table.Path)
@@ -154,23 +155,23 @@ func collectTableAliases(
 		if cteBound {
 			sourceName = ""
 		}
-		addTableAlias(index, table.As, sourceName, sourceCTE, nil, false, scope, localNames, result)
+		addTableAlias(index, table.As, sourceName, sourceCTE, nil, false, scope, localBindings, result)
 		if table.WithOffset != nil {
-			addTableAlias(index, table.WithOffset.As, "", nil, nil, false, scope, localNames, result)
+			addTableAlias(index, table.WithOffset.As, "", nil, nil, false, scope, localBindings, result)
 		}
 	case *ast.SubQueryTableExpr:
 		columns, shapeKnown := extractQueryColumnFacts(index, table.Query)
-		addTableAlias(index, table.As, "", nil, columns, shapeKnown, scope, localNames, result)
+		addTableAlias(index, table.As, "", nil, columns, shapeKnown, scope, localBindings, result)
 	case *ast.Unnest:
-		addTableAlias(index, table.As, "", nil, nil, false, scope, localNames, result)
+		addTableAlias(index, table.As, "", nil, nil, false, scope, localBindings, result)
 		if table.WithOffset != nil {
-			addTableAlias(index, table.WithOffset.As, "", nil, nil, false, scope, localNames, result)
+			addTableAlias(index, table.WithOffset.As, "", nil, nil, false, scope, localBindings, result)
 		}
 	case *ast.ParenTableExpr:
-		collectTableAliases(index, table.Source, scope, localNames, sourcePaths, ctes, result)
+		collectTableAliases(index, table.Source, scope, localBindings, sourcePaths, ctes, result)
 	case *ast.Join:
-		collectTableAliases(index, table.Left, scope, localNames, sourcePaths, ctes, result)
-		collectTableAliases(index, table.Right, scope, localNames, sourcePaths, ctes, result)
+		collectTableAliases(index, table.Left, scope, localBindings, sourcePaths, ctes, result)
+		collectTableAliases(index, table.Right, scope, localBindings, sourcePaths, ctes, result)
 	}
 }
 
@@ -182,7 +183,7 @@ func addTableAlias(
 	sourceColumns []queryColumnFact,
 	sourceShapeKnown bool,
 	scope map[string]*aliasBinding,
-	localNames map[string]struct{},
+	localBindings map[string]*aliasBinding,
 	result *aliasIndex,
 ) {
 	if as == nil || as.Alias == nil {
@@ -205,15 +206,14 @@ func addTableAlias(
 	})
 
 	key := strings.ToUpper(name)
-	if _, duplicate := localNames[key]; duplicate {
+	if previous := localBindings[key]; previous != nil {
 		binding.ambiguous = true
-		if previous := scope[key]; previous != nil {
-			previous.ambiguous = true
-		}
+		binding.duplicateOf = previous
+		previous.ambiguous = true
 		scope[key] = nil
 		return
 	}
-	localNames[key] = struct{}{}
+	localBindings[key] = binding
 	scope[key] = binding
 }
 
