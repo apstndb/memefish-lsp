@@ -501,6 +501,39 @@ func TestDiagnosticReturnsFullAndUnchangedReports(t *testing.T) {
 	}
 }
 
+func TestDiagnosticUsesRecoveredASTAfterSyntaxError(t *testing.T) {
+	const query = `SELECT 1 + FROM Singers;
+SELECT s.UnknownColumn FROM Singers AS s`
+	h := NewHandler(slog.Default(), nil)
+	addParsedTestDocument(t, h, "/schema.sql", "CREATE TABLE Singers (SingerId INT64) PRIMARY KEY (SingerId)")
+	client := &recordingClient{}
+	h.SetClient(client)
+
+	err := h.DidOpen(context.Background(), &protocol.DidOpenTextDocumentParams{
+		TextDocument: protocol.TextDocumentItem{
+			URI:     "file:///query.sql",
+			Version: 1,
+			Text:    query,
+		},
+	})
+	if err == nil {
+		t.Fatal("DidOpen() succeeded for invalid SQL")
+	}
+
+	got, err := h.Diagnostic(context.Background(), &protocol.DocumentDiagnosticParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///query.sql"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := got.Value.(protocol.FullDocumentDiagnosticReport)
+	if !slices.ContainsFunc(full.Items, func(diagnostic protocol.Diagnostic) bool {
+		return diagnostic.Code == unknownColumnDiagnosticCode
+	}) {
+		t.Fatalf("Diagnostic() items = %#v, want syntax and recovered unknown-column diagnostics", full.Items)
+	}
+}
+
 func TestDiagnosticReportsUnknownColumnOnExplicitTableAlias(t *testing.T) {
 	const query = "SELECT s.UnknownColumn FROM Singers AS s"
 	h := newParsedTestHandler(t, "/query.sql", query)

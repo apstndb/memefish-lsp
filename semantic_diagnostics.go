@@ -36,9 +36,6 @@ type diagnosticSchemaTable struct {
 
 func (h *Handler) documentDiagnosticStateLocked(snapshot *documentSnapshot) ([]protocol.Diagnostic, string) {
 	diagnostics := slices.Clone(snapshot.diagnostics)
-	if snapshot.parseErr != nil {
-		return diagnostics, snapshot.resultID
-	}
 	diagnostics = append(diagnostics, h.semanticDiagnosticsLocked(snapshot)...)
 
 	state := snapshot.resultID + ":" + h.diagnosticSchemaFingerprintLocked()
