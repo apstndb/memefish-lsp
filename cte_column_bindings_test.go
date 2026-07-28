@@ -87,7 +87,7 @@ func TestDocumentSnapshotStoresCTEColumnIndex(t *testing.T) {
 	const path = "/test.sql"
 	const text = `WITH LocalRows AS (SELECT 1 AS Id)
 SELECT r.Id FROM LocalRows AS r`
-	snapshot := parseDocumentSnapshot(path, text, 1, 1, documentOriginOpen, nil)
+	snapshot := parseDocumentSnapshot(path, text, 1, 1, documentOriginOpen)
 	if snapshot.parseErr != nil {
 		t.Fatal(snapshot.parseErr)
 	}

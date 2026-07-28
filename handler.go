@@ -2543,7 +2543,7 @@ func (h *Handler) Diagnostic(ctx context.Context, params *protocol.DocumentDiagn
 	text := string(h.fileToContentMap[path])
 	h.fileContentMu.Unlock()
 	if snapshot == nil {
-		snapshot = parseDocumentSnapshot(path, text, 0, 0, 0, nil)
+		snapshot = parseDocumentSnapshot(path, text, 0, 0, 0)
 	}
 	h.fileContentMu.Lock()
 	diagnostics, resultID := h.documentDiagnosticStateLocked(snapshot)
@@ -2593,7 +2593,7 @@ func (h *Handler) DiagnosticWorkspace(ctx context.Context, params *protocol.Work
 		}
 		snapshot := snapshots[path]
 		if snapshot.resultID == "" {
-			snapshot = parseDocumentSnapshot(path, snapshot.text, 0, 0, 0, nil)
+			snapshot = parseDocumentSnapshot(path, snapshot.text, 0, 0, 0)
 		}
 		h.fileContentMu.Lock()
 		diagnostics, resultID := h.documentDiagnosticStateLocked(snapshot)
@@ -2784,7 +2784,6 @@ func (h *Handler) storeWorkspaceDocument(path, text string) {
 	}
 	h.documentRevisions[path]++
 	revision := h.documentRevisions[path]
-	previous := h.documents[path]
 	h.fileContentMu.Unlock()
 
 	snapshot := parseDocumentSnapshot(
@@ -2793,7 +2792,6 @@ func (h *Handler) storeWorkspaceDocument(path, text string) {
 		0,
 		revision,
 		documentOriginWorkspace,
-		previous,
 	)
 
 	h.fileContentMu.Lock()

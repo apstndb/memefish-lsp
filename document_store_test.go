@@ -9,7 +9,7 @@ import (
 	"github.com/apstndb/go-lsp-export/protocol"
 )
 
-func TestDocumentStoreRetainsDistinctLastSuccessfulSnapshot(t *testing.T) {
+func TestDocumentStoreRetainsDistinctCurrentSnapshot(t *testing.T) {
 	const path = "/test.sql"
 	const valid = "SELECT 1"
 	const invalid = "SELECT FROM"
@@ -43,12 +43,6 @@ func TestDocumentStoreRetainsDistinctLastSuccessfulSnapshot(t *testing.T) {
 	if current == nil || current == first || current.text != invalid || current.version != 2 || current.parseErr == nil {
 		t.Fatalf("current snapshot = %#v, want distinct invalid version 2 snapshot", current)
 	}
-	if current.lastSuccessful == nil ||
-		current.lastSuccessful.text != valid ||
-		current.lastSuccessful.revision != first.revision ||
-		current.lastSuccessful.index.text != valid {
-		t.Fatalf("last successful snapshot = %#v, want version 1 text/index/revision", current.lastSuccessful)
-	}
 	if first.text != valid || first.parseErr != nil {
 		t.Fatalf("first snapshot mutated after change: %#v", first)
 	}
@@ -64,16 +58,16 @@ func TestDocumentStoreRejectsStaleInstallAndPublication(t *testing.T) {
 	client := &recordingClient{}
 	h.SetClient(client)
 
-	oldRevision, oldOrigin, oldPrevious := h.reserveDocumentUpdate(
+	oldRevision, oldOrigin := h.reserveDocumentUpdate(
 		path,
 		func(origin documentOrigin) documentOrigin { return origin | documentOriginOpen },
 	)
-	oldSnapshot := parseDocumentSnapshot(path, "SELECT 1", 1, oldRevision, oldOrigin, oldPrevious)
-	newRevision, newOrigin, newPrevious := h.reserveDocumentUpdate(
+	oldSnapshot := parseDocumentSnapshot(path, "SELECT 1", 1, oldRevision, oldOrigin)
+	newRevision, newOrigin := h.reserveDocumentUpdate(
 		path,
 		func(origin documentOrigin) documentOrigin { return origin | documentOriginOpen },
 	)
-	newSnapshot := parseDocumentSnapshot(path, "SELECT 2", 2, newRevision, newOrigin, newPrevious)
+	newSnapshot := parseDocumentSnapshot(path, "SELECT 2", 2, newRevision, newOrigin)
 
 	if h.installDocumentSnapshot(oldSnapshot) {
 		t.Fatal("installed stale snapshot")

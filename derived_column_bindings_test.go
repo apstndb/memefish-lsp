@@ -87,7 +87,7 @@ JOIN (SELECT 2 AS Id) AS inner_d ON outer_d.Id = inner_d.Id`
 func TestDocumentSnapshotStoresDerivedColumnIndex(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT d.Id FROM (SELECT 1 AS Id) AS d"
-	snapshot := parseDocumentSnapshot(path, text, 1, 1, documentOriginOpen, nil)
+	snapshot := parseDocumentSnapshot(path, text, 1, 1, documentOriginOpen)
 	if snapshot.parseErr != nil {
 		t.Fatal(snapshot.parseErr)
 	}

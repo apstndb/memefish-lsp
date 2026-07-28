@@ -19,19 +19,6 @@ const (
 	documentOriginWorkspace
 )
 
-type successfulDocumentSnapshot struct {
-	text           string
-	index          textIndex
-	statements     []ast.Statement
-	facts          documentFacts
-	ctes           cteIndex
-	cteColumns     cteColumnIndex
-	derivedColumns derivedColumnIndex
-	aliases        aliasIndex
-	selectAliases  selectAliasIndex
-	revision       uint64
-}
-
 type documentSnapshot struct {
 	path           string
 	text           string
@@ -49,7 +36,6 @@ type documentSnapshot struct {
 	version        int32
 	revision       uint64
 	origin         documentOrigin
-	lastSuccessful *successfulDocumentSnapshot
 }
 
 func parseDocumentSnapshot(
@@ -57,7 +43,6 @@ func parseDocumentSnapshot(
 	version int32,
 	revision uint64,
 	origin documentOrigin,
-	previous *documentSnapshot,
 ) *documentSnapshot {
 	statements, parseErr := memefish.ParseStatements(path, text)
 	index := newTextIndex(text)
@@ -85,31 +70,7 @@ func parseDocumentSnapshot(
 		revision:       revision,
 		origin:         origin,
 	}
-	if previous != nil {
-		snapshot.lastSuccessful = previous.lastSuccessful
-		if previous.parseErr == nil {
-			snapshot.lastSuccessful = successfulSnapshot(previous)
-		}
-	}
-	if parseErr == nil {
-		snapshot.lastSuccessful = successfulSnapshot(snapshot)
-	}
 	return snapshot
-}
-
-func successfulSnapshot(snapshot *documentSnapshot) *successfulDocumentSnapshot {
-	return &successfulDocumentSnapshot{
-		text:           snapshot.text,
-		index:          snapshot.index,
-		statements:     snapshot.statements,
-		facts:          snapshot.facts,
-		ctes:           snapshot.ctes,
-		cteColumns:     snapshot.cteColumns,
-		derivedColumns: snapshot.derivedColumns,
-		aliases:        snapshot.aliases,
-		selectAliases:  snapshot.selectAliases,
-		revision:       snapshot.revision,
-	}
 }
 
 func (h *Handler) documentOriginLocked(path string) documentOrigin {
@@ -129,15 +90,14 @@ func (h *Handler) documentOriginLocked(path string) documentOrigin {
 func (h *Handler) reserveDocumentUpdate(
 	path string,
 	mutateOrigin func(documentOrigin) documentOrigin,
-) (revision uint64, origin documentOrigin, previous *documentSnapshot) {
+) (revision uint64, origin documentOrigin) {
 	h.fileContentMu.Lock()
 	defer h.fileContentMu.Unlock()
 
 	h.documentRevisions[path]++
 	revision = h.documentRevisions[path]
-	previous = h.documents[path]
 	origin = mutateOrigin(h.documentOriginLocked(path))
-	return revision, origin, previous
+	return revision, origin
 }
 
 func (h *Handler) installDocumentSnapshot(snapshot *documentSnapshot) bool {
@@ -177,8 +137,8 @@ func (h *Handler) updateDocument(
 	mutateOrigin func(documentOrigin) documentOrigin,
 ) error {
 	path := uri.Path()
-	revision, origin, previous := h.reserveDocumentUpdate(path, mutateOrigin)
-	snapshot := parseDocumentSnapshot(path, text, version, revision, origin, previous)
+	revision, origin := h.reserveDocumentUpdate(path, mutateOrigin)
+	snapshot := parseDocumentSnapshot(path, text, version, revision, origin)
 	if !h.installDocumentSnapshot(snapshot) {
 		return snapshot.parseErr
 	}
