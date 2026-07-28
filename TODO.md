@@ -55,6 +55,7 @@ These are memefish-side limitations that affect richer LSP features. Some can be
 - Workspace indexing is extension-based and local: only `.sql` and `.memefish` files under file-scheme workspace folders are indexed.
 - No function catalog/signature metadata: GoogleSQL function completion and signature help need an external catalog of names, overloads, argument names, return types, and docs.
 - No comment-preserving formatter: `ast.Node.SQL()` unparses AST nodes and is not a full-fidelity pretty printer, so formatting can lose comments or intentional layout.
-- Limited support for incomplete-code workflows: completion and code actions often need useful partial ASTs around syntactically invalid text.
+- Recovered ASTs are used for semantic diagnostics and editor features, but memefish does not yet document recovery guarantees for every parse entry point and malformed production.
 - Comments are exposed through lexer tokens, not attached to AST nodes, which makes documentation hover, formatting, and document links harder.
 - AST node ranges are useful but not enough for all refactorings; rename and fine-grained edits need exact identifier/token ranges and symbol roles.
+- The generated memefish walker can encounter interface-typed nil children; `ast_walk.go` prunes them before traversal until upstream handles them directly.
