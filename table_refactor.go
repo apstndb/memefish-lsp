@@ -9,8 +9,6 @@ import (
 	"github.com/apstndb/go-lsp-export/protocol"
 	"github.com/cloudspannerecosystem/memefish/ast"
 	"github.com/cloudspannerecosystem/memefish/token"
-
-	"github.com/apstndb/memefish-lsp/memewalk"
 )
 
 type tableRefactorSite struct {
@@ -37,7 +35,7 @@ func tableRefactorTargetAtPosition(lex *sourceLexer, stmts []ast.Statement, pos 
 		result = tableSymbol{Name: identName(ident), Range: rangeByNode(lex, ident)}
 	}
 
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		if result.Name != "" {
 			return false
 		}
@@ -168,14 +166,14 @@ func collectTableRefactorSites(lex *sourceLexer, stmts []ast.Statement, target s
 		// Until the binder models nested scopes, a same-name CTE makes every
 		// query table site in this statement unsafe for a physical-table rename.
 		hasTargetCTE := false
-		memewalk.Inspect(stmt, func(path []string, node ast.Node) bool {
+		inspectAST(stmt, func(node ast.Node) bool {
 			if cte, ok := node.(*ast.CTE); ok && sameIdent(cte.Name) {
 				hasTargetCTE = true
 			}
 			return true
 		})
 
-		memewalk.Inspect(stmt, func(path []string, node ast.Node) bool {
+		inspectAST(stmt, func(node ast.Node) bool {
 			switch n := node.(type) {
 			case *ast.CreateTable:
 				addPath(n.Name, true)

@@ -5,8 +5,6 @@ import (
 
 	"github.com/apstndb/go-lsp-export/protocol"
 	"github.com/cloudspannerecosystem/memefish/ast"
-
-	"github.com/apstndb/memefish-lsp/memewalk"
 )
 
 type functionCallSite struct {
@@ -28,7 +26,7 @@ func activeASTFunctionCall(
 	var best functionCallSite
 	found := false
 	for _, statement := range statements {
-		memewalk.Inspect(statement, func(path []string, node ast.Node) bool {
+		inspectAST(statement, func(node ast.Node) bool {
 			site, ok := astFunctionCallSite(node, offset)
 			if !ok {
 				return true

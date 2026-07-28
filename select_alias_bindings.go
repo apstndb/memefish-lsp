@@ -5,8 +5,6 @@ import (
 
 	"github.com/apstndb/go-lsp-export/protocol"
 	"github.com/cloudspannerecosystem/memefish/ast"
-
-	"github.com/apstndb/memefish-lsp/memewalk"
 )
 
 type selectAliasBinding struct {
@@ -38,7 +36,7 @@ func extractSelectAliasIndex(
 	var result selectAliasIndex
 	processed := make(map[*ast.Select]struct{})
 	for _, statement := range statements {
-		memewalk.Inspect(statement, func(path []string, node ast.Node) bool {
+		inspectAST(statement, func(node ast.Node) bool {
 			switch node := node.(type) {
 			case *ast.Query:
 				if selectExpr, ok := node.Query.(*ast.Select); ok {
@@ -135,7 +133,7 @@ func addSelectAliasReferences(
 	tableAliases aliasIndex,
 	result *selectAliasIndex,
 ) {
-	memewalk.Inspect(root, func(path []string, node ast.Node) bool {
+	inspectAST(root, func(node ast.Node) bool {
 		if node == nil {
 			return false
 		}

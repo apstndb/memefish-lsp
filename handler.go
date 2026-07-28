@@ -25,7 +25,6 @@ import (
 	"github.com/apstndb/go-lsp-export/protocol"
 
 	"github.com/apstndb/memefish-lsp/lspabst"
-	"github.com/apstndb/memefish-lsp/memewalk"
 
 	"github.com/apstndb/gsqlutils"
 )
@@ -106,14 +105,14 @@ func (h *Handler) SelectionRange(ctx context.Context, params *protocol.Selection
 	lex := newLexer(path, string(h.fileToContentMap[path]))
 	result := make([]protocol.SelectionRange, 0, len(params.Positions))
 	for _, pos := range params.Positions {
-		result = append(result, selectionRangeAtPosition(h.logger, lex, parsed, pos))
+		result = append(result, selectionRangeAtPosition(lex, parsed, pos))
 	}
 	return result, nil
 }
 
-func selectionRangeAtPosition(logger *slog.Logger, lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) protocol.SelectionRange {
+func selectionRangeAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) protocol.SelectionRange {
 	var current *protocol.SelectionRange
-	for _, elem := range findNodesByPos(logger, lex, stmts, pos) {
+	for _, elem := range findNodesByPos(lex, stmts, pos) {
 		r := rangeByNode(lex, elem.Node)
 		if current == nil {
 			current = &protocol.SelectionRange{Range: r}
@@ -265,7 +264,7 @@ func (h *Handler) InlayHint(ctx context.Context, params *protocol.InlayHintParam
 	lex := newLexer(params.TextDocument.URI.Path(), string(h.fileToContentMap[params.TextDocument.URI.Path()]))
 	stmts := h.parsedMap[params.TextDocument.URI.Path()]
 
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		if node == nil {
 			return false
 		}
@@ -1500,7 +1499,7 @@ func relationReferenceLocations(
 	target string,
 ) []protocol.Location {
 	result := []protocol.Location{}
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.PathTableExpr:
 			if strings.EqualFold(pathName(n.Path), target) {
@@ -1547,7 +1546,7 @@ func (h *Handler) CodeLens(_ context.Context, params *protocol.CodeLensParams) (
 	stmts := h.parsedMap[path]
 	lex := newLexer(path, string(h.fileToContentMap[path]))
 	result := []protocol.CodeLens{}
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		var name *ast.Path
 		switch declaration := node.(type) {
 		case *ast.CreateTable:
@@ -1932,7 +1931,7 @@ type tableSymbol struct {
 
 func simpleRelationSymbolAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (tableSymbol, bool) {
 	var result tableSymbol
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		if result.Name != "" {
 			return false
 		}
@@ -1988,7 +1987,7 @@ func isUnquotedIdentifier(s string) bool {
 
 func relationNameAtPosition(lex *sourceLexer, stmts []ast.Statement, pos protocol.Position) (string, bool) {
 	var result string
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		if result != "" {
 			return false
 		}
@@ -2044,7 +2043,7 @@ func (h *Handler) columnDefinitionMatches(name string) []columnDefinitionMatch {
 	result := []columnDefinitionMatch{}
 	for path, stmts := range h.parsedMap {
 		lex := newLexer(path, string(h.fileToContentMap[path]))
-		memewalk.InspectSlice(stmts, func(astPath []string, node ast.Node) bool {
+		inspectASTMany(stmts, func(node ast.Node) bool {
 			table, ok := node.(*ast.CreateTable)
 			if !ok {
 				return true
@@ -2068,7 +2067,7 @@ func (h *Handler) columnDefinitionMatches(name string) []columnDefinitionMatch {
 func (h *Handler) createTableMatches(name string) []*ast.CreateTable {
 	result := []*ast.CreateTable{}
 	for _, stmts := range h.parsedMap {
-		memewalk.InspectSlice(stmts, func(astPath []string, node ast.Node) bool {
+		inspectASTMany(stmts, func(node ast.Node) bool {
 			table, ok := node.(*ast.CreateTable)
 			if ok && strings.EqualFold(pathName(table.Name), name) {
 				result = append(result, table)
@@ -2205,25 +2204,21 @@ func (h *Handler) Hover(ctx context.Context, params *protocol.HoverParams) (resu
 }
 
 type pathElem struct {
-	Accessor string
-	Node     ast.Node
+	Node ast.Node
 }
 
-func findNodesByPos(logger *slog.Logger, lex *sourceLexer, stmts []ast.Statement, lspPos protocol.Position) []pathElem {
+func findNodesByPos(lex *sourceLexer, stmts []ast.Statement, lspPos protocol.Position) []pathElem {
 	var result []pathElem
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		if node == nil {
 			return false
 		}
 
 		nodePos := lex.Position(node.Pos(), node.End())
 
-		// logger.Info("findNodesByPos", slog.Any("path", path), slog.String("nodeType", fmt.Sprintf("%T", node)), slog.Any("nodePos", positionByNode(lex, node)))
 		if include(lex, nodePos, lspPos) {
-			// logger.Info("findNodesByPos", slog.Any("path", path), slog.String("nodeType", fmt.Sprintf("%T", node)))
 			result = append(result, pathElem{
-				Accessor: lo.LastOrEmpty(path),
-				Node:     node,
+				Node: node,
 			})
 			return true
 		}
@@ -2270,7 +2265,7 @@ func (h *Handler) FoldingRange(ctx context.Context, params *protocol.FoldingRang
 		}
 	}
 
-	visitorFunc := func(path []string, node ast.Node) bool {
+	visitorFunc := func(node ast.Node) bool {
 		switch n := node.(type) {
 		case *ast.CTE:
 			result = append(result, toFoldingRangeByNode(lex, n.QueryExpr, protocol.Region))
@@ -2289,7 +2284,7 @@ func (h *Handler) FoldingRange(ctx context.Context, params *protocol.FoldingRang
 		return true
 	}
 	stmts := h.parsedMap[Path]
-	memewalk.InspectSlice(stmts, visitorFunc)
+	inspectASTMany(stmts, visitorFunc)
 
 	return result, nil
 }
@@ -2377,7 +2372,7 @@ func (h *Handler) SemanticTokensFull(ctx context.Context, params *protocol.Seman
 	lex := newLexer(filepath, s)
 
 	parsed := h.parsedMap[params.TextDocument.URI.Path()]
-	memewalk.InspectSlice(parsed, func(path []string, node ast.Node) bool {
+	inspectASTMany(parsed, func(node ast.Node) bool {
 		if node == nil {
 			return false
 		}

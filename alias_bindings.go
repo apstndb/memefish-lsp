@@ -6,8 +6,6 @@ import (
 
 	"github.com/apstndb/go-lsp-export/protocol"
 	"github.com/cloudspannerecosystem/memefish/ast"
-
-	"github.com/apstndb/memefish-lsp/memewalk"
 )
 
 type aliasBinding struct {
@@ -70,7 +68,7 @@ func indexAliasNode(
 	if node == nil {
 		return
 	}
-	memewalk.Inspect(node, func(path []string, child ast.Node) bool {
+	inspectAST(node, func(child ast.Node) bool {
 		if child == nil {
 			return false
 		}
@@ -100,7 +98,7 @@ func indexSelectAliases(
 		bindings: cloneAliasScope(scope),
 	})
 
-	memewalk.Inspect(selectExpr, func(path []string, node ast.Node) bool {
+	inspectAST(selectExpr, func(node ast.Node) bool {
 		if node == nil {
 			return false
 		}

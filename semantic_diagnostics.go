@@ -11,8 +11,6 @@ import (
 
 	"github.com/apstndb/go-lsp-export/protocol"
 	"github.com/cloudspannerecosystem/memefish/ast"
-
-	"github.com/apstndb/memefish-lsp/memewalk"
 )
 
 const (
@@ -160,7 +158,7 @@ func duplicateTableAliasDiagnostics(snapshot *documentSnapshot) []protocol.Diagn
 
 func duplicateCTEDiagnostics(snapshot *documentSnapshot) []protocol.Diagnostic {
 	var result []protocol.Diagnostic
-	memewalk.InspectSlice(snapshot.statements, func(path []string, node ast.Node) bool {
+	inspectASTMany(snapshot.statements, func(node ast.Node) bool {
 		query, ok := node.(*ast.Query)
 		if !ok || query.With == nil {
 			return true
@@ -196,7 +194,7 @@ func duplicateCTEDiagnostics(snapshot *documentSnapshot) []protocol.Diagnostic {
 
 func selectOrdinalDiagnostics(snapshot *documentSnapshot) []protocol.Diagnostic {
 	var result []protocol.Diagnostic
-	memewalk.InspectSlice(snapshot.statements, func(path []string, node ast.Node) bool {
+	inspectASTMany(snapshot.statements, func(node ast.Node) bool {
 		switch node := node.(type) {
 		case *ast.Select:
 			if node.GroupBy == nil {

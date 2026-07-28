@@ -8,8 +8,6 @@ import (
 	"github.com/apstndb/go-lsp-export/protocol"
 	"github.com/cloudspannerecosystem/memefish/ast"
 	"github.com/cloudspannerecosystem/memefish/token"
-
-	"github.com/apstndb/memefish-lsp/memewalk"
 )
 
 type viewRefactorPlan struct {
@@ -31,7 +29,7 @@ func viewRefactorTargetAtPosition(lex *sourceLexer, stmts []ast.Statement, pos p
 		result = tableSymbol{Name: identName(ident), Range: rangeByNode(lex, ident)}
 	}
 
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		if result.Name != "" {
 			return false
 		}
@@ -136,7 +134,7 @@ func collectViewRefactorSites(
 		sites = append(sites, tableRefactorSite{Name: identName(ident), Range: r})
 	}
 
-	memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+	inspectASTMany(stmts, func(node ast.Node) bool {
 		switch node := node.(type) {
 		case *ast.CreateView:
 			addPath(node.Name, true)
@@ -175,7 +173,7 @@ func collectViewRefactorSites(
 func (h *Handler) hasSimpleRelationDeclaration(name string) bool {
 	for _, stmts := range h.parsedMap {
 		found := false
-		memewalk.InspectSlice(stmts, func(path []string, node ast.Node) bool {
+		inspectASTMany(stmts, func(node ast.Node) bool {
 			var declarationName *ast.Path
 			switch node := node.(type) {
 			case *ast.CreateTable:
