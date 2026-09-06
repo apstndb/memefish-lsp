@@ -845,6 +845,35 @@ func TestFormattingRejectsInvalidDocument(t *testing.T) {
 	}
 }
 
+func TestFormattingRejectsUnsafeMemefishUnparse(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+	}{
+		{name: "nil change stream alteration", text: "ALTER CHANGE STREAM A SET"},
+		{name: "nil new expression child", text: "SELECT NEW A00{A0}"},
+		{name: "empty with variables", text: "SELECT WITH(0)"},
+		{name: "integer field access spacing", text: "SELECT 0 .A0000"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const path = "/test.sql"
+			h := NewHandler(slog.Default(), nil)
+			h.fileToContentMap[path] = []byte(test.text)
+
+			got, err := h.Formatting(context.Background(), &protocol.DocumentFormattingParams{
+				TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 0 {
+				t.Fatalf("Formatting() returned unsafe edit: %#v", got)
+			}
+		})
+	}
+}
+
 func TestRangeFormattingFormatsFullySelectedStatement(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT  1;\nSELECT  2"
@@ -911,6 +940,27 @@ func TestRangeFormattingPreservesCommentsInSelection(t *testing.T) {
 	}
 }
 
+func TestRangeFormattingRejectsUnsafeMemefishUnparse(t *testing.T) {
+	const path = "/test.sql"
+	const text = "ALTER CHANGE STREAM A SET"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.RangeFormatting(context.Background(), &protocol.DocumentRangeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Range: protocol.Range{
+			Start: protocol.Position{},
+			End:   protocol.Position{Character: uint32(len(text))},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("RangeFormatting() returned unsafe edit: %#v", got)
+	}
+}
+
 func TestRangesFormattingFormatsMultipleStatements(t *testing.T) {
 	const path = "/test.sql"
 	const text = "SELECT  1;\nSELECT  2"
@@ -968,6 +1018,25 @@ func TestOnTypeFormattingIgnoresOtherCharacters(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("OnTypeFormatting() returned edits for non-trigger character: %#v", got)
+	}
+}
+
+func TestOnTypeFormattingRejectsUnsafeMemefishUnparse(t *testing.T) {
+	const path = "/test.sql"
+	const text = "ALTER CHANGE STREAM A SET;"
+	h := NewHandler(slog.Default(), nil)
+	h.fileToContentMap[path] = []byte(text)
+
+	got, err := h.OnTypeFormatting(context.Background(), &protocol.DocumentOnTypeFormattingParams{
+		TextDocument: protocol.TextDocumentIdentifier{URI: "file:///test.sql"},
+		Position:     protocol.Position{Character: uint32(len(text))},
+		Ch:           ";",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("OnTypeFormatting() returned unsafe edit: %#v", got)
 	}
 }
 

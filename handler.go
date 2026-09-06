@@ -766,11 +766,15 @@ func rangeFormattingEdits(path, text string, target protocol.Range) []protocol.T
 	lex := newLexer(path, text)
 	edits := []protocol.TextEdit{}
 	for _, stmt := range stmts {
+		formatted, ok := formatStatement(path, stmt)
+		if !ok {
+			continue
+		}
 		stmtRange := rangeByNode(lex, stmt)
 		if !rangeContains(target, stmtRange) {
 			continue
 		}
-		edits = append(edits, protocol.TextEdit{Range: stmtRange, NewText: stmt.SQL()})
+		edits = append(edits, protocol.TextEdit{Range: stmtRange, NewText: formatted})
 	}
 	return edits
 }
@@ -791,7 +795,12 @@ func (h *Handler) OnTypeFormatting(ctx context.Context, params *protocol.Documen
 	lex := newLexer(path, text)
 	var candidate ast.Statement
 	var candidateRange protocol.Range
+	var candidateSQL string
 	for _, stmt := range stmts {
+		formatted, ok := formatStatement(path, stmt)
+		if !ok {
+			continue
+		}
 		stmtRange := rangeByNode(lex, stmt)
 		if comparePosition(stmtRange.End, params.Position) > 0 {
 			continue
@@ -799,12 +808,13 @@ func (h *Handler) OnTypeFormatting(ctx context.Context, params *protocol.Documen
 		if candidate == nil || comparePosition(candidateRange.End, stmtRange.End) < 0 {
 			candidate = stmt
 			candidateRange = stmtRange
+			candidateSQL = formatted
 		}
 	}
 	if candidate == nil || rangeHasComments(path, text, candidateRange) {
 		return []protocol.TextEdit{}, nil
 	}
-	return []protocol.TextEdit{{Range: candidateRange, NewText: candidate.SQL()}}, nil
+	return []protocol.TextEdit{{Range: candidateRange, NewText: candidateSQL}}, nil
 }
 
 func formatGoogleSQL(path, text string) (string, bool) {
@@ -815,10 +825,35 @@ func formatGoogleSQL(path, text string) (string, bool) {
 	if err != nil || len(stmts) == 0 {
 		return "", false
 	}
-	formatted := strings.Join(lo.Map(stmts, func(stmt ast.Statement, _ int) string {
-		return stmt.SQL()
-	}), ";\n") + ";\n"
-	return formatted, true
+	formatted := make([]string, 0, len(stmts))
+	for _, stmt := range stmts {
+		sql, ok := formatStatement(path, stmt)
+		if !ok {
+			return "", false
+		}
+		formatted = append(formatted, sql)
+	}
+	return strings.Join(formatted, ";\n") + ";\n", true
+}
+
+func formatStatement(path string, stmt ast.Statement) (sql string, ok bool) {
+	// memefish v0.8.1 can accept malformed statements whose SQL method panics
+	// or emits unparsable text (upstream issues #418, #419, #424, and #425).
+	defer func() {
+		if recover() != nil {
+			sql = ""
+			ok = false
+		}
+	}()
+
+	sql = stmt.SQL()
+	if sql == "" {
+		return "", false
+	}
+	if _, err := memefish.ParseStatement(path, sql); err != nil {
+		return "", false
+	}
+	return sql, true
 }
 
 func documentHasComments(path, text string) bool {
